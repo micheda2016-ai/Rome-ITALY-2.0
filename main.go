@@ -13,7 +13,6 @@ import (
 )
 
 func main() {
-	// Server HTTP per mantenere Render sempre attivo e in salute sulla porta 10000
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000"
@@ -28,7 +27,6 @@ func main() {
 		}
 	}()
 
-	// Recupera e pulisce il token
 	token := strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
 	if token == "" {
 		log.Println("⚠️ ERRORE: La variabile d'ambiente DISCORD_TOKEN non è impostata!")
@@ -54,7 +52,6 @@ func main() {
 		}
 	}
 
-	// Mantiene il servizio attivo per il server HTTP
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
@@ -285,7 +282,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		channelSelectEsiti := discordgo.SelectMenu{
 			CustomID:    "sel_chan_esiti_" + selectedCategory,
-			Placeholder: "Seleziona il canale degli esiti / log (#)...",
+			Placeholder: "Seleziona il canale degli esiti / risultati (#)...",
 			MenuType:    discordgo.ChannelSelectMenu,
 			ChannelTypes: []discordgo.ChannelType{
 				discordgo.ChannelTypeGuildText,
@@ -301,7 +298,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nSeleziona qui sotto i canali e i ruoli direttamente dalle liste del server:", strings.ToUpper(selectedCategory[4:])),
+				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nSeleziona qui sotto i canali (con la lista `#`) e i ruoli (con la lista `@`) direttamente dal server:", strings.ToUpper(selectedCategory[4:])),
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{channelSelectPanel}},
