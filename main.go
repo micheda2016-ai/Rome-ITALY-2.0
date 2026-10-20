@@ -13,6 +13,7 @@ import (
 )
 
 func main() {
+	// Server HTTP per mantenere Render sempre attivo e in salute sulla porta 10000
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000"
@@ -27,6 +28,7 @@ func main() {
 		}
 	}()
 
+	// Recupera e pulisce il token
 	token := strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
 	if token == "" {
 		log.Println("⚠️ ERRORE: La variabile d'ambiente DISCORD_TOKEN non è impostata!")
@@ -52,6 +54,7 @@ func main() {
 		}
 	}
 
+	// Mantiene il servizio attivo per il server HTTP
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
@@ -167,7 +170,6 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
-// Pannello principale di configurazione
 func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
 		Title:       "⚙️ CONFIGURAZIONE GUIDATA - ROME ITALY 2.0",
@@ -254,6 +256,17 @@ func sendRegistraArrestoPanel(s *discordgo.Session, i *discordgo.InteractionCrea
 func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
 
+	if strings.HasPrefix(customID, "sel_chan_panel_") || strings.HasPrefix(customID, "sel_chan_esiti_") || strings.HasPrefix(customID, "sel_role_auth_") {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ **Impostazione salvata con successo!** Il canale o ruolo selezionato è stato collegato correttamente.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
 	switch customID {
 	case "setup_server_select":
 		selectedCategory := "cittadinanza"
@@ -261,7 +274,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			selectedCategory = i.MessageComponentData().Values[0]
 		}
 
-		// Qui usiamo i componenti nativi di Discord per selezionare Canali (#) e Ruoli (@) con un menu a tendina vero!
 		channelSelectPanel := discordgo.SelectMenu{
 			CustomID:    "sel_chan_panel_" + selectedCategory,
 			Placeholder: "Seleziona il canale del pannello (#)...",
@@ -296,16 +308,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{channelSelectEsiti}},
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{roleSelectAuth}},
 				},
-			},
-		})
-
-	// Intercettiamo la selezione dei menu nativi canali/ruoli
-	case strings.HasPrefix(customID, "sel_chan_panel_") || strings.HasPrefix(customID, "sel_chan_esiti_") || strings.HasPrefix(customID, "sel_role_auth_"):
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "✅ **Impostazione salvata con successo!** Il canale o ruolo selezionato è stato collegato correttamente.",
-				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 
