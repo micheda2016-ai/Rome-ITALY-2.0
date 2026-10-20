@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	// Server HTTP per mantenere Render sempre attivo e in salute sulla porta 10000
+	// Server HTTP per mantenere Render sempre attivo sulla porta 10000
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000"
@@ -28,7 +28,7 @@ func main() {
 		}
 	}()
 
-	// Recupera e pulisce il token
+	// Recupera e pulisce il token dalle variabili d'ambiente
 	token := strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
 	if token == "" {
 		log.Println("⚠️ ERRORE: La variabile d'ambiente DISCORD_TOKEN non è impostata!")
@@ -54,7 +54,7 @@ func main() {
 		}
 	}
 
-	// Mantiene il servizio attivo per il server HTTP
+	// Mantiene il processo attivo
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
@@ -164,35 +164,35 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup bonifico` inviato con successo nel canale!",
+				Content: "✅ Pannello `/setup bonifico` inviato con successo!",
 			},
 		})
 	case "porto-darmi":
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup porto-darmi` inviato con successo nel canale!",
+				Content: "✅ Pannello `/setup porto-darmi` inviato con successo!",
 			},
 		})
 	case "immatricolazione":
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup immatricolazione` inviato con successo nel canale!",
+				Content: "✅ Pannello `/setup immatricolazione` inviato con successo!",
 			},
 		})
 	case "emetti-multa":
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup emetti-multa` inviato con successo nel canale!",
+				Content: "✅ Pannello `/setup emetti-multa` inviato con successo!",
 			},
 		})
 	case "staff-panel":
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup staff-panel` inviato con successo nel canale!",
+				Content: "✅ Pannello `/setup staff-panel` inviato con successo!",
 			},
 		})
 	default:
@@ -452,4 +452,124 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					discordgo.ActionsRow{
 						Components: []discordgo.MessageComponent{
 							discordgo.TextInput{
-								Custom
+								CustomID:    "input_cognome_rp",
+								Label:       "Cognome RP",
+								Style:       discordgo.TextInputShort,
+								Placeholder: "Es. Rossi",
+								Required:    true,
+							},
+						},
+					},
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "input_data_nascita",
+								Label:       "Data di Nascita RP",
+								Style:       discordgo.TextInputShort,
+								Placeholder: "GG/MM/AAAA",
+								Required:    true,
+							},
+						},
+					},
+				},
+			},
+		})
+
+	case "btn_registra_arresto":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseModal,
+			Data: &discordgo.InteractionResponseData{
+				CustomID: "modal_registra_arresto",
+				Title:    "Verbale d'Arresto",
+				Components: []discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "input_utente_arrestato",
+								Label:       "Utente Roblox Arrestato",
+								Style:       discordgo.TextInputShort,
+								Required:    true,
+							},
+						},
+					},
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "input_reati",
+								Label:       "Reati Commessi",
+								Style:       discordgo.TextInputParagraph,
+								Placeholder: "Es. Inseguimento ad alta velocita...",
+								Required:    true,
+							},
+						},
+					},
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "input_prigione",
+								Label:       "Anni o Mesi di Prigione",
+								Style:       discordgo.TextInputShort,
+								Required:    true,
+							},
+						},
+					},
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "input_cauzione",
+								Label:       "Cauzione In Euro",
+								Style:       discordgo.TextInputShort,
+								Placeholder: "Es. 5000",
+								Required:    false,
+							},
+						},
+					},
+				},
+			},
+		})
+
+	case "btn_riscuoti_stipendio":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ **Stipendio Riscosso!** Il bot ha accreditato la busta paga sul tuo conto.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	}
+}
+
+func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	customID := i.ModalSubmitData().CustomID
+
+	if strings.HasPrefix(customID, "modal_conferma_conto_") {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "🎉 **Conto Corrente Aperto con Successo!** Il tuo conto è stato registrato.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	switch customID {
+	case "modal_cittadinanza":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "🇮🇹 **Richiesta Cittadinanza Registrata!** La carta d'identità è stata inserita nell'Anagrafe.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+	case "modal_registra_arresto":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "🚨 **Verbale Registrato!** L'arresto è stato inserito nella banca dati.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+	}
+}
