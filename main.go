@@ -208,42 +208,42 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
 		Title:       "⚙️ CONFIGURAZIONE CANALI ED ESITI - ROME ITALY 2.0",
-		Description: "Seleziona dal menu il canale o servizio che desideri configurare per impostare il canale dell'esito, il canale pannello e il ruolo di accesso:",
+		Description: "Seleziona dal menu il servizio da configurare. Potrai impostare i canali con il simbolo `#` e i ruoli con `@`:",
 		Color:       0x0099FF,
 	}
 
 	selectMenu := discordgo.SelectMenu{
 		CustomID:    "setup_server_select",
-		Placeholder: "Scegli il servizio/canale da configurare...",
+		Placeholder: "Scegli il servizio da configurare...",
 		Options: []discordgo.SelectMenuOption{
 			{
 				Label:       "Anagrafe & Cittadinanza",
 				Value:       "cfg_cittadinanza",
-				Description: "Configura canale #cittadinanza, canale esiti e ruolo anagrafe",
+				Description: "Configura canale #cittadinanza e ruolo cittadino",
 				Emoji:       &discordgo.ComponentEmoji{Name: "🇮🇹"},
 			},
 			{
 				Label:       "Banche & Conti Correnti",
 				Value:       "cfg_banche",
-				Description: "Configura canale #apri-conto, esiti bancari e ruolo direttore",
+				Description: "Configura canale #apri-conto e ruolo direttore",
 				Emoji:       &discordgo.ComponentEmoji{Name: "💳"},
 			},
 			{
 				Label:       "Forze dell'Ordine & Arresti",
 				Value:       "cfg_police",
-				Description: "Configura canale #registra-arresto, esiti/registro e ruolo FDO",
+				Description: "Configura canale #registra-arresto e ruolo FDO",
 				Emoji:       &discordgo.ComponentEmoji{Name: "🚨"},
 			},
 			{
 				Label:       "Busta Paga & Stipendi",
 				Value:       "cfg_stipendi",
-				Description: "Configura canale #busta-paga, esiti accrediti e ruolo dipendente",
+				Description: "Configura canale #busta-paga e ruolo lavoratore",
 				Emoji:       &discordgo.ComponentEmoji{Name: "💵"},
 			},
 			{
 				Label:       "Logs Staff & Moderazione",
 				Value:       "cfg_staff",
-				Description: "Configura canale log moderazione e ruolo Staff",
+				Description: "Configura canale #log-staff e ruolo moderatore",
 				Emoji:       &discordgo.ComponentEmoji{Name: "🛡️"},
 			},
 		},
@@ -288,7 +288,7 @@ func sendApriContoPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 func sendBustaPagaPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
 		Title:       "💼 RISCOSSIONE BUSTA PAGA - ROME ITALY 2.0",
-		Description: "Clicca sul bottone per riscattare lo stipendio settimanale. Il bot riconoscerà automaticamente il tuo ruolo fazione e accrediterà l'importo sul tuo conto.",
+		Description: "Clicca sul bottone per riscattare lo stipendio settimanale. Il bot riconoscerà automaticamente il tuo ruolo fazione.",
 		Color:       0xF1C40F,
 	}
 
@@ -374,15 +374,15 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Type: discordgo.InteractionResponseModal,
 			Data: &discordgo.InteractionResponseData{
 				CustomID: "modal_config_" + selectedCategory,
-				Title:    "Configurazione " + strings.ToUpper(selectedCategory[4:]),
+				Title:    "Configura Servizio (" + strings.ToUpper(selectedCategory[4:]) + ")",
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{
 						Components: []discordgo.MessageComponent{
 							discordgo.TextInput{
-								CustomID:    "cfg_canale_pannello",
-								Label:       "ID Canale del Pannello (es. #cittadinanza)",
+								CustomID:    "cfg_canale_nome",
+								Label:       "Nome Canale Pannello (es. #cittadinanza)",
 								Style:       discordgo.TextInputShort,
-								Placeholder: "Incolla l'ID del canale del pannello...",
+								Placeholder: "#nome-canale",
 								Required:    true,
 							},
 						},
@@ -390,10 +390,10 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					discordgo.ActionsRow{
 						Components: []discordgo.MessageComponent{
 							discordgo.TextInput{
-								CustomID:    "cfg_canale_esiti",
-								Label:       "ID Canale degli Esiti / Log",
+								CustomID:    "cfg_esiti_nome",
+								Label:       "Nome Canale Esiti / Log (es. #esiti)",
 								Style:       discordgo.TextInputShort,
-								Placeholder: "Incolla l'ID del canale per gli esiti...",
+								Placeholder: "#canale-esiti",
 								Required:    true,
 							},
 						},
@@ -401,10 +401,10 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 					discordgo.ActionsRow{
 						Components: []discordgo.MessageComponent{
 							discordgo.TextInput{
-								CustomID:    "cfg_ruolo_accesso",
-								Label:       "ID Ruolo Autorizzato / Accesso",
+								CustomID:    "cfg_ruolo_nome",
+								Label:       "Nome Ruolo Accesso (es. @Polizia)",
 								Style:       discordgo.TextInputShort,
-								Placeholder: "Incolla l'ID del ruolo abilitato...",
+								Placeholder: "@nome-ruolo",
 								Required:    true,
 							},
 						},
@@ -590,7 +590,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("⚙️ **Configurazione completata per '%s'!**\n- **Canale Pannello**: Impostato!\n- **Canale Esiti**: Collegato per l'invio dei verbali/notifiche!\n- **Ruolo Accesso**: Assegnato!", strings.ToUpper(servizio)),
+				Content: fmt.Sprintf("✅ **Configurazione Salvata per %s!**\nI canali e i ruoli con tag `#` e `@` sono stati associati correttamente al sistema del server.", strings.ToUpper(servizio)),
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -613,7 +613,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "🇮🇹 **Richiesta Cittadinanza Registrata!** La carta d'identità è stata inviata al canale degli esiti per la verifica.",
+				Content: "🇮🇹 **Richiesta Cittadinanza Registrata!** Inviata al canale esiti designato.",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -622,7 +622,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "🚨 **Verbale Registrato!** L'arresto è stato pubblicato nel canale registro arresti e salvato in banca dati.",
+				Content: "🚨 **Verbale Registrato!** Pubblicato nel canale registro arresti.",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
