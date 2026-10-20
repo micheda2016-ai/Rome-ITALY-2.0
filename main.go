@@ -12,7 +12,18 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// Struttura per salvare in memoria i canali e i ruoli configurati
+type ServerConfig struct {
+	PanelChannelID string
+	EsitiChannelID string
+	AuthRoleID     string
+}
+
+// Mappa per memorizzare le configurazioni di ogni comando
+var serverConfigs = make(map[string]ServerConfig)
+
 func main() {
+	// Server HTTP per Render (mantiene il bot sempre attivo sulla porta 10000)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000"
@@ -27,6 +38,7 @@ func main() {
 		}
 	}()
 
+	// Recupera e pulisce il token Discord
 	token := strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
 	if token == "" {
 		log.Println("⚠️ ERRORE: La variabile d'ambiente DISCORD_TOKEN non è impostata!")
@@ -52,6 +64,7 @@ func main() {
 		}
 	}
 
+	// Mantiene il servizio in esecuzione
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
@@ -68,7 +81,7 @@ func registerCommands(s *discordgo.Session) {
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "server",
-					Description: "Apre il pannello generale per configurare tutti i singoli comandi",
+					Description: "Pannello generale per configurare canali (#) e ruoli (@) di ogni comando",
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -205,23 +218,23 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
 		Title:       "⚙️ CONFIGURAZIONE GLOBALE COMANDI - ROME ITALY 2.0",
-		Description: "Seleziona dal menu a tendina il comando/servizio specifico che vuoi configurare. Potrai impostare canali e ruoli con un semplice clic:",
+		Description: "Seleziona dal menu a tendina il comando che vuoi configurare. Potrai scegliere i canali e i ruoli direttamente dalle liste di Discord:",
 		Color:       0x0099FF,
 	}
 
 	selectMenu := discordgo.SelectMenu{
 		CustomID:    "setup_server_select",
-		Placeholder: "Scegli quale comando configurare...",
+		Placeholder: "Scegli il comando da configurare...",
 		Options: []discordgo.SelectMenuOption{
-			{Label: "Cittadinanza & Anagrafe", Value: "cfg_cittadinanza", Description: "Configura canali e ruoli per /cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🇮🇹"}},
-			{Label: "Porto d'Armi", Value: "cfg_porto_darmi", Description: "Configura canali e ruoli per /porto-darmi", Emoji: &discordgo.ComponentEmoji{Name: "🔫"}},
-			{Label: "Apertura Conto Bancario", Value: "cfg_apri_conto", Description: "Configura canali e ruoli per /apri-conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
-			{Label: "Bonifico Bancario", Value: "cfg_bonifico", Description: "Configura canali e ruoli per /bonifico", Emoji: &discordgo.ComponentEmoji{Name: "💸"}},
-			{Label: "Riscossione Busta Paga", Value: "cfg_busta_paga", Description: "Configura canali e ruoli per /busta-paga", Emoji: &discordgo.ComponentEmoji{Name: "💵"}},
-			{Label: "Immatricolazione Veicoli", Value: "cfg_immatricolazione", Description: "Configura canali e ruoli per /immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚗"}},
-			{Label: "Registro Arresti FDO", Value: "cfg_registra_arresto", Description: "Configura canali e ruoli per /registra-arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}},
-			{Label: "Emissione Multe", Value: "cfg_emetti_multa", Description: "Configura canali e ruoli per /emetti-multa", Emoji: &discordgo.ComponentEmoji{Name: "📄"}},
-			{Label: "Staff & Moderazione Panel", Value: "cfg_staff_panel", Description: "Configura canali e ruoli per /staff-panel", Emoji: &discordgo.ComponentEmoji{Name: "🛡️"}},
+			{Label: "Cittadinanza & Anagrafe", Value: "cfg_cittadinanza", Description: "Imposta canali e ruoli per /cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🇮🇹"}},
+			{Label: "Porto d'Armi", Value: "cfg_porto_darmi", Description: "Imposta canali e ruoli per /porto-darmi", Emoji: &discordgo.ComponentEmoji{Name: "🔫"}},
+			{Label: "Apertura Conto Bancario", Value: "cfg_apri_conto", Description: "Imposta canali e ruoli per /apri-conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
+			{Label: "Bonifico Bancario", Value: "cfg_bonifico", Description: "Imposta canali e ruoli per /bonifico", Emoji: &discordgo.ComponentEmoji{Name: "💸"}},
+			{Label: "Riscossione Busta Paga", Value: "cfg_busta_paga", Description: "Imposta canali e ruoli per /busta-paga", Emoji: &discordgo.ComponentEmoji{Name: "💵"}},
+			{Label: "Immatricolazione Veicoli", Value: "cfg_immatricolazione", Description: "Imposta canali e ruoli per /immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚗"}},
+			{Label: "Registro Arresti FDO", Value: "cfg_police", Description: "Imposta canali e ruoli per /registra-arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}},
+			{Label: "Emissione Multe", Value: "cfg_emetti_multa", Description: "Imposta canali e ruoli per /emetti-multa", Emoji: &discordgo.ComponentEmoji{Name: "📄"}},
+			{Label: "Staff & Moderazione Panel", Value: "cfg_staff_panel", Description: "Imposta canali e ruoli per /staff-panel", Emoji: &discordgo.ComponentEmoji{Name: "🛡️"}},
 		},
 	}
 
@@ -292,24 +305,14 @@ func sendRegistraArrestoPanel(s *discordgo.Session, i *discordgo.InteractionCrea
 func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
 
-	if strings.HasPrefix(customID, "sel_chan_panel_") || strings.HasPrefix(customID, "sel_chan_esiti_") || strings.HasPrefix(customID, "sel_role_auth_") {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "✅ **Configurazione salvata con successo!** Canale e ruolo sono stati associati al comando scelto.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
-
-	switch customID {
-	case "setup_server_select":
-		selectedCategory := "cittadinanza"
+	// 1. Quando selezioni un comando dal menu di /setup server
+	if customID == "setup_server_select" {
+		selectedCategory := "cfg_cittadinanza"
 		if len(i.MessageComponentData().Values) > 0 {
 			selectedCategory = i.MessageComponentData().Values[0]
 		}
 
+		// Menu nativo per scegliere il canale del pannello (#)
 		channelSelectPanel := discordgo.SelectMenu{
 			CustomID:    "sel_chan_panel_" + selectedCategory,
 			Placeholder: "Seleziona il canale del comando (#)...",
@@ -319,15 +322,17 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		}
 
+		// Menu nativo per scegliere il canale dove inviare i risultati/esiti (#)
 		channelSelectEsiti := discordgo.SelectMenu{
 			CustomID:    "sel_chan_esiti_" + selectedCategory,
-			Placeholder: "Seleziona il canale dove arrivano i risultati / esiti (#)...",
+			Placeholder: "Seleziona il canale dei risultati/esiti (#)...",
 			MenuType:    discordgo.ChannelSelectMenu,
 			ChannelTypes: []discordgo.ChannelType{
 				discordgo.ChannelTypeGuildText,
 			},
 		}
 
+		// Menu nativo per scegliere il ruolo autorizzato (@)
 		roleSelectAuth := discordgo.SelectMenu{
 			CustomID:    "sel_role_auth_" + selectedCategory,
 			Placeholder: "Seleziona il ruolo autorizzato (@)...",
@@ -337,7 +342,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nUsa i menu sottostanti per scegliere il canale del comando, il canale dei risultati (`#`) e il ruolo autorizzato (`@`):", strings.ToUpper(selectedCategory[4:])),
+				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nScegli dai menu a tendina qui sotto i canali (`#`) e il ruolo (`@`):", strings.ToUpper(selectedCategory[4:])),
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{channelSelectPanel}},
@@ -346,7 +351,40 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				},
 			},
 		})
+		return
+	}
 
+	// 2. Salvataggio automatico delle scelte fatte dai menu nativi di Discord
+	if strings.HasPrefix(customID, "sel_chan_panel_") || strings.HasPrefix(customID, "sel_chan_esiti_") || strings.HasPrefix(customID, "sel_role_auth_") {
+		values := i.MessageComponentData().Values
+		if len(values) > 0 {
+			valoreScelto := values[0]
+			parts := strings.Split(customID, "_")
+			servizioKey := parts[len(parts)-1]
+
+			cfg := serverConfigs[servizioKey]
+			if strings.Contains(customID, "sel_chan_panel_") {
+				cfg.PanelChannelID = valoreScelto
+			} else if strings.Contains(customID, "sel_chan_esiti_") {
+				cfg.EsitiChannelID = valoreScelto
+			} else if strings.Contains(customID, "sel_role_auth_") {
+				cfg.AuthRoleID = valoreScelto
+			}
+			serverConfigs[servizioKey] = cfg
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ **Selezione salvata con successo nel sistema!**",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// 3. Gestione bottoni utenti (Banche, Cittadinanza, Arresti)
+	switch customID {
 	case "btn_apri_conto":
 		selectBanche := discordgo.SelectMenu{
 			CustomID:    "select_banca_choice",
@@ -433,24 +471,99 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.ModalSubmitData().CustomID
 
+	// Invio scheda apertura conto nel canale esiti bancario scelto
 	if strings.HasPrefix(customID, "modal_conferma_conto_") {
+		banca := strings.TrimPrefix(customID, "modal_conferma_conto_")
+		data := i.ModalSubmitData()
+		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "🎉 **Conto Corrente Aperto con Successo!**", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{
+				Content: "🎉 **Conto Corrente Aperto con Successo!** La richiesta è stata inviata.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
 		})
+
+		targetChannel := serverConfigs["apri_conto"].EsitiChannelID
+		if targetChannel == "" {
+			targetChannel = i.ChannelID
+		}
+
+		embedEsito := &discordgo.MessageEmbed{
+			Title:       "💳 NUOVA APERTURA CONTO BANCARIO",
+			Color:       0x2ECC71,
+			Description: fmt.Sprintf("**Utente:** <@%s>\n**Nome & Cognome RP:** %s\n**Banca:** %s", i.Member.User.ID, nomeRP, strings.ToUpper(banca)),
+		}
+		s.ChannelMessageSendEmbed(targetChannel, embedEsito)
 		return
 	}
 
 	switch customID {
+	// Invio scheda cittadinanza nel canale esiti anagrafe scelto
 	case "modal_cittadinanza":
+		data := i.ModalSubmitData()
+		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		cognomeRP := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		dataNascita := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "🇮🇹 **Richiesta Cittadinanza Registrata!**", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{
+				Content: "🇮🇹 **Richiesta Cittadinanza Registrata!** Inviata nel canale di raccolta esiti.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
 		})
+
+		targetChannel := serverConfigs["cittadinanza"].EsitiChannelID
+		if targetChannel == "" {
+			targetChannel = i.ChannelID
+		}
+
+		embedAnagrafe := &discordgo.MessageEmbed{
+			Title: "🇮🇹 NUOVA RICHIESTA CITTADINANZA / CARTA D'IDENTITÀ",
+			Color: 0x3498DB,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+				{Name: "Nome RP", Value: nomeRP, Inline: true},
+				{Name: "Cognome RP", Value: cognomeRP, Inline: true},
+				{Name: "Data di Nascita", Value: dataNascita, Inline: true},
+			},
+		}
+		s.ChannelMessageSendEmbed(targetChannel, embedAnagrafe)
+
+	// Invio verbale arresto nel canale esiti registro FDO scelto
 	case "modal_registra_arresto":
+		data := i.ModalSubmitData()
+		utenteArrestato := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		reati := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		prigione := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		cauzione := data.Components[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "🚨 **Verbale Registrato!**", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{
+				Content: "🚨 **Verbale Registrato!** Inviato nel canale del registro ufficiale.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
 		})
+
+		targetChannel := serverConfigs["police"].EsitiChannelID
+		if targetChannel == "" {
+			targetChannel = i.ChannelID
+		}
+
+		embedArresto := &discordgo.MessageEmbed{
+			Title: "🚨 VERBALE D'ARRESTO UFFICIALE",
+			Color: 0xE74C3C,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Agente", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+				{Name: "Arrestato", Value: utenteArrestato, Inline: true},
+				{Name: "Pena", Value: prigione, Inline: true},
+				{Name: "Cauzione", Value: cauzione, Inline: true},
+				{Name: "Reati", Value: reati, Inline: false},
+			},
+		}
+		s.ChannelMessageSendEmbed(targetChannel, embedArresto)
 	}
 }
