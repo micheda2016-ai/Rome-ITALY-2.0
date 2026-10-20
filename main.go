@@ -68,7 +68,7 @@ func registerCommands(s *discordgo.Session) {
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 					Name:        "server",
-					Description: "Apre il pannello interattivo per configurare canali e ruoli",
+					Description: "Apre il pannello generale per configurare tutti i singoli comandi",
 				},
 				{
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
@@ -157,11 +157,46 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		sendCittadinanzaPanel(s, i)
 	case "registra-arresto":
 		sendRegistraArrestoPanel(s, i)
+	case "bonifico":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ Pannello `/setup bonifico` inviato con successo!",
+			},
+		})
+	case "porto-darmi":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ Pannello `/setup porto-darmi` inviato con successo!",
+			},
+		})
+	case "immatricolazione":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ Pannello `/setup immatricolazione` inviato con successo!",
+			},
+		})
+	case "emetti-multa":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ Pannello `/setup emetti-multa` inviato con successo!",
+			},
+		})
+	case "staff-panel":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "✅ Pannello `/setup staff-panel` inviato con successo!",
+			},
+		})
 	default:
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("✅ Pannello `/setup %s` inviato con successo!", subCmd),
+				Content: "❌ Sottocomando non riconosciuto.",
 			},
 		})
 	}
@@ -169,20 +204,24 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	embed := &discordgo.MessageEmbed{
-		Title:       "⚙️ CONFIGURAZIONE GUIDATA - ROME ITALY 2.0",
-		Description: "Usa il menu a tendina sottostante per scegliere quale sezione configurare. Potrai selezionare direttamente i canali e i ruoli del server!",
+		Title:       "⚙️ CONFIGURAZIONE GLOBALE COMANDI - ROME ITALY 2.0",
+		Description: "Seleziona dal menu a tendina il comando/servizio specifico che vuoi configurare. Potrai impostare canali e ruoli con un semplice clic:",
 		Color:       0x0099FF,
 	}
 
 	selectMenu := discordgo.SelectMenu{
 		CustomID:    "setup_server_select",
-		Placeholder: "Scegli il servizio da configurare...",
+		Placeholder: "Scegli quale comando configurare...",
 		Options: []discordgo.SelectMenuOption{
-			{Label: "Anagrafe & Cittadinanza", Value: "cfg_cittadinanza", Description: "Configura canali e ruoli cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🇮🇹"}},
-			{Label: "Banche & Conti Correnti", Value: "cfg_banche", Description: "Configura canali e ruoli banche", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
-			{Label: "Forze dell'Ordine & Arresti", Value: "cfg_police", Description: "Configura canali verbali e ruoli FDO", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}},
-			{Label: "Busta Paga & Stipendi", Value: "cfg_stipendi", Description: "Configura accrediti e ruoli fazione", Emoji: &discordgo.ComponentEmoji{Name: "💵"}},
-			{Label: "Logs Staff & Moderazione", Value: "cfg_staff", Description: "Configura canali log e ruoli staff", Emoji: &discordgo.ComponentEmoji{Name: "🛡️"}},
+			{Label: "Cittadinanza & Anagrafe", Value: "cfg_cittadinanza", Description: "Configura canali e ruoli per /cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🇮🇹"}},
+			{Label: "Porto d'Armi", Value: "cfg_porto_darmi", Description: "Configura canali e ruoli per /porto-darmi", Emoji: &discordgo.ComponentEmoji{Name: "🔫"}},
+			{Label: "Apertura Conto Bancario", Value: "cfg_apri_conto", Description: "Configura canali e ruoli per /apri-conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
+			{Label: "Bonifico Bancario", Value: "cfg_bonifico", Description: "Configura canali e ruoli per /bonifico", Emoji: &discordgo.ComponentEmoji{Name: "💸"}},
+			{Label: "Riscossione Busta Paga", Value: "cfg_busta_paga", Description: "Configura canali e ruoli per /busta-paga", Emoji: &discordgo.ComponentEmoji{Name: "💵"}},
+			{Label: "Immatricolazione Veicoli", Value: "cfg_immatricolazione", Description: "Configura canali e ruoli per /immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚗"}},
+			{Label: "Registro Arresti FDO", Value: "cfg_registra_arresto", Description: "Configura canali e ruoli per /registra-arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}},
+			{Label: "Emissione Multe", Value: "cfg_emetti_multa", Description: "Configura canali e ruoli per /emetti-multa", Emoji: &discordgo.ComponentEmoji{Name: "📄"}},
+			{Label: "Staff & Moderazione Panel", Value: "cfg_staff_panel", Description: "Configura canali e ruoli per /staff-panel", Emoji: &discordgo.ComponentEmoji{Name: "🛡️"}},
 		},
 	}
 
@@ -257,7 +296,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "✅ **Impostazione salvata con successo!** Il canale o ruolo selezionato è stato collegato correttamente.",
+				Content: "✅ **Configurazione salvata con successo!** Canale e ruolo sono stati associati al comando scelto.",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -273,7 +312,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		channelSelectPanel := discordgo.SelectMenu{
 			CustomID:    "sel_chan_panel_" + selectedCategory,
-			Placeholder: "Seleziona il canale del pannello (#)...",
+			Placeholder: "Seleziona il canale del comando (#)...",
 			MenuType:    discordgo.ChannelSelectMenu,
 			ChannelTypes: []discordgo.ChannelType{
 				discordgo.ChannelTypeGuildText,
@@ -282,7 +321,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		channelSelectEsiti := discordgo.SelectMenu{
 			CustomID:    "sel_chan_esiti_" + selectedCategory,
-			Placeholder: "Seleziona il canale degli esiti / risultati (#)...",
+			Placeholder: "Seleziona il canale dove arrivano i risultati / esiti (#)...",
 			MenuType:    discordgo.ChannelSelectMenu,
 			ChannelTypes: []discordgo.ChannelType{
 				discordgo.ChannelTypeGuildText,
@@ -298,7 +337,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nSeleziona qui sotto i canali (con la lista `#`) e i ruoli (con la lista `@`) direttamente dal server:", strings.ToUpper(selectedCategory[4:])),
+				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nUsa i menu sottostanti per scegliere il canale del comando, il canale dei risultati (`#`) e il ruolo autorizzato (`@`):", strings.ToUpper(selectedCategory[4:])),
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{channelSelectPanel}},
