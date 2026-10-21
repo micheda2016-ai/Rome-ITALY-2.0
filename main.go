@@ -21,9 +21,10 @@ type ServerConfig struct {
 
 // Struttura dati conto corrente utente
 type BankAccount struct {
-	OwnerName string
-	BankName  string
-	Balance   int
+	OwnerName  string
+	RobloxName string
+	BankName   string
+	Balance    int
 }
 
 // Database in memoria
@@ -185,7 +186,7 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		embed := &discordgo.MessageEmbed{
 			Title:       "🏛️ ESTRATTO CONTO BANCARIO",
 			Color:       0x2ECC71,
-			Description: fmt.Sprintf("**Intestatario:** %s\n**Istituto Bancario:** %s\n💰 **Saldo Disponibile:** `€ %d`", account.OwnerName, strings.ToUpper(account.BankName), account.Balance),
+			Description: fmt.Sprintf("**Intestatario RP:** %s\n**Utente Roblox:** `@%s`\n**Istituto Bancario:** %s\n💰 **Saldo Disponibile:** `€ %d`", account.OwnerName, account.RobloxName, strings.ToUpper(account.BankName), account.Balance),
 		}
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -208,17 +209,12 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	case "server":
 		sendServerSetupPanel(s, i)
 	default:
-		// Gestione generica dell'anteprima pannelli con pulsante "Invia nel Canale Settato"
 		sendPanelPreview(s, i, subCmd)
 	}
 }
 
-// Invia l'anteprima privata del pannello con il pulsante "Invia nel Canale Settato"
 func sendPanelPreview(s *discordgo.Session, i *discordgo.InteractionCreate, serviceKey string) {
 	keyMappa := strings.ReplaceAll(serviceKey, "-", "_")
-	if keyMappa == "porto_darmi" {
-		keyMappa = "porto_darmi"
-	}
 
 	targetChannel := serverConfigs[keyMappa].PanelChannelID
 	var channelInfo string
@@ -291,7 +287,6 @@ func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) 
 func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
 
-	// Gestione della pressione del bottone "Invia Pannello nel Canale"
 	if strings.HasPrefix(customID, "send_panel_to_channel_") {
 		serviceKey := strings.TrimPrefix(customID, "send_panel_to_channel_")
 		keyMappa := strings.ReplaceAll(serviceKey, "-", "_")
@@ -301,7 +296,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			targetChannel = i.ChannelID
 		}
 
-		// Invia il pannello reale nel canale di destinazione
 		publishPublicPanel(s, targetChannel, serviceKey)
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -314,7 +308,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Approva/Rifiuta Staff (Sì / No)
 	if strings.HasPrefix(customID, "approve_yes_") || strings.HasPrefix(customID, "approve_no_") {
 		parts := strings.Split(customID, "_")
 		azione := parts[1]
@@ -352,7 +345,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Menu di selezione /setup server
 	if customID == "setup_server_select" {
 		selectedCategory := "cfg_cittadinanza"
 		if len(i.MessageComponentData().Values) > 0 {
@@ -398,7 +390,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Salvataggio canali/ruoli scelti
 	if strings.HasPrefix(customID, "sel_chan_panel_") || strings.HasPrefix(customID, "sel_chan_esiti_") || strings.HasPrefix(customID, "sel_role_auth_") {
 		values := i.MessageComponentData().Values
 		if len(values) > 0 {
@@ -427,7 +418,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Gestione bottoni utenti
 	switch customID {
 	case "btn_apri_conto":
 		selectBanche := discordgo.SelectMenu{
@@ -464,6 +454,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				Title:    "Apertura Conto Corrente",
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_nome_cognome_rp", Label: "Nome e Cognome RP", Style: discordgo.TextInputShort, Placeholder: "Es. Mario Rossi", Required: true}}},
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_roblox_username", Label: "Username Roblox", Style: discordgo.TextInputShort, Placeholder: "Es. RobloxUser123", Required: true}}},
 				},
 			},
 		})
@@ -477,6 +468,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_nome_rp", Label: "Nome RP", Style: discordgo.TextInputShort, Placeholder: "Es. Mario", Required: true}}},
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_cognome_rp", Label: "Cognome RP", Style: discordgo.TextInputShort, Placeholder: "Es. Rossi", Required: true}}},
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_roblox_user", Label: "Username Roblox", Style: discordgo.TextInputShort, Placeholder: "Es. RobloxPlayer1", Required: true}}},
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_data_nascita", Label: "Data di Nascita RP", Style: discordgo.TextInputShort, Placeholder: "GG/MM/AAAA", Required: true}}},
 				},
 			},
@@ -490,6 +482,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				Title:    "Richiesta Licenza Porto d'Armi",
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_nome_cognome_pda", Label: "Nome e Cognome RP", Style: discordgo.TextInputShort, Required: true}}},
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_roblox_pda", Label: "Username Roblox", Style: discordgo.TextInputShort, Required: true}}},
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_motivazione_pda", Label: "Motivazione Richiesta", Style: discordgo.TextInputParagraph, Required: true}}},
 				},
 			},
@@ -545,7 +538,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
-// Pubblica il messaggio del pannello pubblico nel canale specifico
 func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
 	switch serviceKey {
 	case "apri-conto":
@@ -602,12 +594,14 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		banca := strings.TrimPrefix(customID, "modal_conferma_conto_")
 		data := i.ModalSubmitData()
 		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		robloxUser := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		userID := i.Member.User.ID
 
 		userBankAccounts[userID] = BankAccount{
-			OwnerName: nomeRP,
-			BankName:  banca,
-			Balance:   7000,
+			OwnerName:  nomeRP,
+			RobloxName: robloxUser,
+			BankName:   banca,
+			Balance:    7000,
 		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -632,7 +626,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		embedEsito := &discordgo.MessageEmbed{
 			Title:       "💳 NUOVA RICHIESTA APERTURA CONTO BANCARIO",
 			Color:       0x2ECC71,
-			Description: fmt.Sprintf("**Richiedente:** <@%s>\n**Nome & Cognome RP:** %s\n**Banca:** %s\n\n*Saldo accreditato:* € 7.000", userID, nomeRP, strings.ToUpper(banca)),
+			Description: fmt.Sprintf("**Richiedente Discord:** <@%s>\n**Utente Roblox:** `@%s`\n**Nome & Cognome RP:** %s\n**Banca:** %s\n\n*Saldo accreditato:* € 7.000", userID, robloxUser, nomeRP, strings.ToUpper(banca)),
 		}
 
 		btnYes := discordgo.Button{Label: "Accetta (Sì)", Style: discordgo.SuccessButton, CustomID: "approve_yes_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "✅"}}
@@ -652,7 +646,8 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	case "modal_porto_darmi":
 		data := i.ModalSubmitData()
 		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-		motivazione := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		robloxUser := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		motivazione := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		userID := i.Member.User.ID
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -678,7 +673,8 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Title: "🔫 RICHIESTA LICENZA PORTO D'ARMI",
 			Color: 0xE67E22,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Richiedente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Utente Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
 				{Name: "Nome & Cognome RP", Value: nomeRP, Inline: true},
 				{Name: "Motivazione", Value: motivazione, Inline: false},
 			},
@@ -699,7 +695,8 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		data := i.ModalSubmitData()
 		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		cognomeRP := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
-		dataNascita := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		robloxUser := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		dataNascita := data.Components[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		userID := i.Member.User.ID
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -725,7 +722,8 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Title: "🇮🇹 NUOVA RICHIESTA CITTADINANZA / CARTA D'IDENTITÀ",
 			Color: 0x3498DB,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Richiedente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Utente Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
 				{Name: "Nome RP", Value: nomeRP, Inline: true},
 				{Name: "Cognome RP", Value: cognomeRP, Inline: true},
 				{Name: "Data di Nascita", Value: dataNascita, Inline: true},
@@ -774,8 +772,8 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Title: "🚨 VERBALE D'ARRESTO UFFICIALE",
 			Color: 0xE74C3C,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Agente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
-				{Name: "Arrestato", Value: utenteArrestato, Inline: true},
+				{Name: "Agente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Arrestato Roblox", Value: fmt.Sprintf("`@%s`", utenteArrestato), Inline: true},
 				{Name: "Pena", Value: prigione, Inline: true},
 				{Name: "Cauzione", Value: cauzione, Inline: true},
 				{Name: "Reati", Value: reati, Inline: false},
