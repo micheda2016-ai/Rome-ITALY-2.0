@@ -214,9 +214,7 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 func sendPanelPreview(s *discordgo.Session, i *discordgo.InteractionCreate, serviceKey string) {
-	keyMappa := strings.ReplaceAll(serviceKey, "-", "_")
-
-	targetChannel := serverConfigs[keyMappa].PanelChannelID
+	targetChannel := serverConfigs[serviceKey].PanelChannelID
 	var channelInfo string
 	if targetChannel == "" {
 		channelInfo = "⚠️ *Nessun canale impostato in `/setup server`. Verrà inviato in questo canale.*"
@@ -260,15 +258,15 @@ func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		CustomID:    "setup_server_select",
 		Placeholder: "Scegli il comando da configurare...",
 		Options: []discordgo.SelectMenuOption{
-			{Label: "Cittadinanza & Anagrafe", Value: "cfg_cittadinanza", Description: "Imposta canali e ruoli per /cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🇮🇹"}},
-			{Label: "Porto d'Armi", Value: "cfg_porto_darmi", Description: "Imposta canali e ruoli per /porto-darmi", Emoji: &discordgo.ComponentEmoji{Name: "🔫"}},
-			{Label: "Apertura Conto Bancario", Value: "cfg_apri_conto", Description: "Imposta canali e ruoli per /apri-conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
-			{Label: "Bonifico Bancario", Value: "cfg_bonifico", Description: "Imposta canali e ruoli per /bonifico", Emoji: &discordgo.ComponentEmoji{Name: "💸"}},
-			{Label: "Riscossione Busta Paga", Value: "cfg_busta_paga", Description: "Imposta canali e ruoli per /busta-paga", Emoji: &discordgo.ComponentEmoji{Name: "💵"}},
-			{Label: "Immatricolazione Veicoli", Value: "cfg_immatricolazione", Description: "Imposta canali e ruoli per /immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚗"}},
-			{Label: "Registro Arresti FDO", Value: "cfg_police", Description: "Imposta canali e ruoli per /registra-arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}},
-			{Label: "Emissione Multe", Value: "cfg_emetti_multa", Description: "Imposta canali e ruoli per /emetti-multa", Emoji: &discordgo.ComponentEmoji{Name: "📄"}},
-			{Label: "Staff & Moderazione Panel", Value: "cfg_staff_panel", Description: "Imposta canali e ruoli per /staff-panel", Emoji: &discordgo.ComponentEmoji{Name: "🛡️"}},
+			{Label: "Cittadinanza & Anagrafe", Value: "cittadinanza", Description: "Imposta canali e ruoli per /cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🇮🇹"}},
+			{Label: "Porto d'Armi", Value: "porto-darmi", Description: "Imposta canali e ruoli per /porto-darmi", Emoji: &discordgo.ComponentEmoji{Name: "🔫"}},
+			{Label: "Apertura Conto Bancario", Value: "apri-conto", Description: "Imposta canali e ruoli per /apri-conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
+			{Label: "Bonifico Bancario", Value: "bonifico", Description: "Imposta canali e ruoli per /bonifico", Emoji: &discordgo.ComponentEmoji{Name: "💸"}},
+			{Label: "Riscossione Busta Paga", Value: "busta-paga", Description: "Imposta canali e ruoli per /busta-paga", Emoji: &discordgo.ComponentEmoji{Name: "💵"}},
+			{Label: "Immatricolazione Veicoli", Value: "immatricolazione", Description: "Imposta canali e ruoli per /immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚗"}},
+			{Label: "Registro Arresti FDO", Value: "registra-arresto", Description: "Imposta canali e ruoli per /registra-arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}},
+			{Label: "Emissione Multe", Value: "emetti-multa", Description: "Imposta canali e ruoli per /emetti-multa", Emoji: &discordgo.ComponentEmoji{Name: "📄"}},
+			{Label: "Staff & Moderazione Panel", Value: "staff-panel", Description: "Imposta canali e ruoli per /staff-panel", Emoji: &discordgo.ComponentEmoji{Name: "🛡️"}},
 		},
 	}
 
@@ -287,11 +285,11 @@ func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) 
 func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
 
+	// Pressione del bottone "Invia Pannello nel Canale"
 	if strings.HasPrefix(customID, "send_panel_to_channel_") {
 		serviceKey := strings.TrimPrefix(customID, "send_panel_to_channel_")
-		keyMappa := strings.ReplaceAll(serviceKey, "-", "_")
 
-		targetChannel := serverConfigs[keyMappa].PanelChannelID
+		targetChannel := serverConfigs[serviceKey].PanelChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
@@ -308,6 +306,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	// Approva/Rifiuta Staff (Sì / No)
 	if strings.HasPrefix(customID, "approve_yes_") || strings.HasPrefix(customID, "approve_no_") {
 		parts := strings.Split(customID, "_")
 		azione := parts[1]
@@ -345,14 +344,15 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	// Selezione dal menu generale di /setup server
 	if customID == "setup_server_select" {
-		selectedCategory := "cfg_cittadinanza"
+		selectedCategory := "cittadinanza"
 		if len(i.MessageComponentData().Values) > 0 {
 			selectedCategory = i.MessageComponentData().Values[0]
 		}
 
 		channelSelectPanel := discordgo.SelectMenu{
-			CustomID:    "sel_chan_panel_" + selectedCategory,
+			CustomID:    "selchanpanel_" + selectedCategory,
 			Placeholder: "Seleziona il canale del comando (#)...",
 			MenuType:    discordgo.ChannelSelectMenu,
 			ChannelTypes: []discordgo.ChannelType{
@@ -361,7 +361,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 
 		channelSelectEsiti := discordgo.SelectMenu{
-			CustomID:    "sel_chan_esiti_" + selectedCategory,
+			CustomID:    "selchanesiti_" + selectedCategory,
 			Placeholder: "Seleziona il canale dei risultati/esiti (#)...",
 			MenuType:    discordgo.ChannelSelectMenu,
 			ChannelTypes: []discordgo.ChannelType{
@@ -370,7 +370,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 
 		roleSelectAuth := discordgo.SelectMenu{
-			CustomID:    "sel_role_auth_" + selectedCategory,
+			CustomID:    "selroleauth_" + selectedCategory,
 			Placeholder: "Seleziona il ruolo autorizzato (@)...",
 			MenuType:    discordgo.RoleSelectMenu,
 		}
@@ -378,7 +378,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nScegli dai menu a tendina qui sotto i canali (`#`) e il ruolo (`@`):", strings.ToUpper(selectedCategory[4:])),
+				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nScegli dai menu a tendina qui sotto i canali (`#`) e il ruolo (`@`):", strings.ToUpper(selectedCategory)),
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{channelSelectPanel}},
@@ -390,19 +390,27 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	if strings.HasPrefix(customID, "sel_chan_panel_") || strings.HasPrefix(customID, "sel_chan_esiti_") || strings.HasPrefix(customID, "sel_role_auth_") {
+	// Salvataggio canali e ruoli nel database in memoria
+	if strings.HasPrefix(customID, "selchanpanel_") || strings.HasPrefix(customID, "selchanesiti_") || strings.HasPrefix(customID, "selroleauth_") {
 		values := i.MessageComponentData().Values
 		if len(values) > 0 {
 			valoreScelto := values[0]
-			parts := strings.Split(customID, "_")
-			servizioKey := parts[len(parts)-1]
+
+			var servizioKey string
+			if strings.HasPrefix(customID, "selchanpanel_") {
+				servizioKey = strings.TrimPrefix(customID, "selchanpanel_")
+			} else if strings.HasPrefix(customID, "selchanesiti_") {
+				servizioKey = strings.TrimPrefix(customID, "selchanesiti_")
+			} else if strings.HasPrefix(customID, "selroleauth_") {
+				servizioKey = strings.TrimPrefix(customID, "selroleauth_")
+			}
 
 			cfg := serverConfigs[servizioKey]
-			if strings.Contains(customID, "sel_chan_panel_") {
+			if strings.HasPrefix(customID, "selchanpanel_") {
 				cfg.PanelChannelID = valoreScelto
-			} else if strings.Contains(customID, "sel_chan_esiti_") {
+			} else if strings.HasPrefix(customID, "selchanesiti_") {
 				cfg.EsitiChannelID = valoreScelto
-			} else if strings.Contains(customID, "sel_role_auth_") {
+			} else if strings.HasPrefix(customID, "selroleauth_") {
 				cfg.AuthRoleID = valoreScelto
 			}
 			serverConfigs[servizioKey] = cfg
@@ -418,6 +426,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	// Gestione bottoni interattivi
 	switch customID {
 	case "btn_apri_conto":
 		selectBanche := discordgo.SelectMenu{
@@ -612,12 +621,12 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
-		targetChannel := serverConfigs["apri_conto"].EsitiChannelID
+		targetChannel := serverConfigs["apri-conto"].EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["apri_conto"].AuthRoleID
+		authRole := serverConfigs["apri-conto"].AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
@@ -658,12 +667,12 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
-		targetChannel := serverConfigs["porto_darmi"].EsitiChannelID
+		targetChannel := serverConfigs["porto-darmi"].EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["porto_darmi"].AuthRoleID
+		authRole := serverConfigs["porto-darmi"].AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
@@ -757,12 +766,12 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
-		targetChannel := serverConfigs["police"].EsitiChannelID
+		targetChannel := serverConfigs["registra-arresto"].EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["police"].AuthRoleID
+		authRole := serverConfigs["registra-arresto"].AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
