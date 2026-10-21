@@ -12,15 +12,26 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// Struttura per salvare in memoria i canali e i ruoli configurati
+// Struttura per salvare in memoria i canali e i ruoli configurati per ogni comando
 type ServerConfig struct {
 	PanelChannelID string
 	EsitiChannelID string
 	AuthRoleID     string
 }
 
-// Mappa per memorizzare le configurazioni di ogni comando
+// Struttura dati conto corrente utente
+type BankAccount struct {
+	OwnerName string
+	BankName  string
+	Balance   int
+}
+
+// Database in memoria
 var serverConfigs = make(map[string]ServerConfig)
+var userBankAccounts = make(map[string]BankAccount) // Key: Discord User ID
+var roleStipendi = map[string]int{
+	"default_stipendio": 1500,
+}
 
 func main() {
 	// Server HTTP per Render (mantiene il bot sempre attivo sulla porta 10000)
@@ -64,7 +75,6 @@ func main() {
 		}
 	}
 
-	// Mantiene il servizio in esecuzione
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-sc
@@ -74,6 +84,10 @@ func main() {
 
 func registerCommands(s *discordgo.Session) {
 	commands := []*discordgo.ApplicationCommand{
+		{
+			Name:        "conto",
+			Description: "Visualizza il saldo del tuo conto corrente bancario e la banca associata",
+		},
 		{
 			Name:        "setup",
 			Description: "Configura i pannelli interattivi e i canali del server",
@@ -152,7 +166,38 @@ func interactionHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	options := i.ApplicationCommandData().Options
+	data := i.ApplicationCommandData()
+
+	if data.Name == "conto" {
+		userID := i.Member.User.ID
+		account, exists := userBankAccounts[userID]
+		if !exists {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Non possiedi ancora un conto corrente registrato! Usa il pannello `/setup apri-conto` per aprirne uno.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		embed := &discordgo.MessageEmbed{
+			Title:       "🏛️ ESTRATTO CONTO BANCARIO",
+			Color:       0x2ECC71,
+			Description: fmt.Sprintf("**Intestatario:** %s\n**Istituto Bancario:** %s\n💰 **Saldo Disponibile:** `€ %d`", account.OwnerName, strings.ToUpper(account.BankName), account.Balance),
+		}
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Embeds: []*discordgo.MessageEmbed{embed},
+				Flags:  discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	options := data.Options
 	if len(options) == 0 {
 		return
 	}
@@ -162,57 +207,50 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch subCmd {
 	case "server":
 		sendServerSetupPanel(s, i)
-	case "apri-conto":
-		sendApriContoPanel(s, i)
-	case "busta-paga":
-		sendBustaPagaPanel(s, i)
-	case "cittadinanza":
-		sendCittadinanzaPanel(s, i)
-	case "registra-arresto":
-		sendRegistraArrestoPanel(s, i)
-	case "bonifico":
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup bonifico` inviato con successo!",
-			},
-		})
-	case "porto-darmi":
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup porto-darmi` inviato con successo!",
-			},
-		})
-	case "immatricolazione":
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup immatricolazione` inviato con successo!",
-			},
-		})
-	case "emetti-multa":
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup emetti-multa` inviato con successo!",
-			},
-		})
-	case "staff-panel":
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "✅ Pannello `/setup staff-panel` inviato con successo!",
-			},
-		})
 	default:
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Sottocomando non riconosciuto.",
-			},
-		})
+		// Gestione generica dell'anteprima pannelli con pulsante "Invia nel Canale Settato"
+		sendPanelPreview(s, i, subCmd)
 	}
+}
+
+// Invia l'anteprima privata del pannello con il pulsante "Invia nel Canale Settato"
+func sendPanelPreview(s *discordgo.Session, i *discordgo.InteractionCreate, serviceKey string) {
+	keyMappa := strings.ReplaceAll(serviceKey, "-", "_")
+	if keyMappa == "porto_darmi" {
+		keyMappa = "porto_darmi"
+	}
+
+	targetChannel := serverConfigs[keyMappa].PanelChannelID
+	var channelInfo string
+	if targetChannel == "" {
+		channelInfo = "⚠️ *Nessun canale impostato in `/setup server`. Verrà inviato in questo canale.*"
+	} else {
+		channelInfo = fmt.Sprintf("📍 *Canale di destinazione impostato:* <#%s>", targetChannel)
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("📤 INVIA PANNELLO: %s", strings.ToUpper(serviceKey)),
+		Description: fmt.Sprintf("Clicca sul pulsante sottostante per pubblicare ufficialmente il pannello nel canale configurato.\n\n%s", channelInfo),
+		Color:       0x3498DB,
+	}
+
+	btnSend := discordgo.Button{
+		Label:    "Invia Pannello nel Canale",
+		Style:    discordgo.SuccessButton,
+		CustomID: "send_panel_to_channel_" + serviceKey,
+		Emoji:    &discordgo.ComponentEmoji{Name: "📨"},
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{btnSend}},
+			},
+			Flags: discordgo.MessageFlagsEphemeral,
+		},
+	})
 }
 
 func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -250,69 +288,77 @@ func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	})
 }
 
-func sendApriContoPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	embed := &discordgo.MessageEmbed{
-		Title:       "🏛️ APERTURA CONTO CORRENTE - ROME ITALY 2.0",
-		Description: "Clicca sul bottone per scegliere il tuo istituto bancario.",
-		Color:       0x2ECC71,
-	}
-	button := discordgo.Button{Label: "Apri Conto Corrente", Style: discordgo.SuccessButton, CustomID: "btn_apri_conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}}
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{button}}}},
-	})
-}
-
-func sendBustaPagaPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	embed := &discordgo.MessageEmbed{
-		Title:       "💼 RISCOSSIONE BUSTA PAGA - ROME ITALY 2.0",
-		Description: "Clicca sul bottone per riscattare lo stipendio.",
-		Color:       0xF1C40F,
-	}
-	button := discordgo.Button{Label: "Riscuoti Busta Paga", Style: discordgo.PrimaryButton, CustomID: "btn_riscuoti_stipendio", Emoji: &discordgo.ComponentEmoji{Name: "💵"}}
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{button}}}},
-	})
-}
-
-func sendCittadinanzaPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	embed := &discordgo.MessageEmbed{
-		Title:       "🇮🇹 ANAGRAFE CENTRALE - ROME ITALY 2.0",
-		Description: "Richiedi la tua Carta d'Identità.",
-		Color:       0x3498DB,
-	}
-	button := discordgo.Button{Label: "Richiedi Cittadinanza", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🆔"}}
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{button}}}},
-	})
-}
-
-func sendRegistraArrestoPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	embed := &discordgo.MessageEmbed{
-		Title:       "🚨 BANCA DATI POLIZIA DI STATO / CARABINIERI",
-		Description: "Verbale dei fermi e degli arresti.",
-		Color:       0xE74C3C,
-	}
-	button := discordgo.Button{Label: "Registra Arresto", Style: discordgo.DangerButton, CustomID: "btn_registra_arresto", Emoji: &discordgo.ComponentEmoji{Name: "📝"}}
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{button}}}},
-	})
-}
-
 func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
 
-	// 1. Quando selezioni un comando dal menu di /setup server
+	// Gestione della pressione del bottone "Invia Pannello nel Canale"
+	if strings.HasPrefix(customID, "send_panel_to_channel_") {
+		serviceKey := strings.TrimPrefix(customID, "send_panel_to_channel_")
+		keyMappa := strings.ReplaceAll(serviceKey, "-", "_")
+
+		targetChannel := serverConfigs[keyMappa].PanelChannelID
+		if targetChannel == "" {
+			targetChannel = i.ChannelID
+		}
+
+		// Invia il pannello reale nel canale di destinazione
+		publishPublicPanel(s, targetChannel, serviceKey)
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("✅ **Pannello inviato con successo nel canale <#%s>!**", targetChannel),
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	// Approva/Rifiuta Staff (Sì / No)
+	if strings.HasPrefix(customID, "approve_yes_") || strings.HasPrefix(customID, "approve_no_") {
+		parts := strings.Split(customID, "_")
+		azione := parts[1]
+		targetUserID := parts[2]
+
+		originalEmbed := i.Message.Embeds[0]
+		newEmbed := *originalEmbed
+
+		if azione == "yes" {
+			newEmbed.Color = 0x2ECC71
+			newEmbed.Title = "✅ RICHIESTA APPROVATA DALLO STAFF"
+			newEmbed.Description += fmt.Sprintf("\n\n**Stato:** Approvato da <@%s>", i.Member.User.ID)
+		} else {
+			newEmbed.Color = 0xE74C3C
+			newEmbed.Title = "❌ RICHIESTA RIFIUTATA DALLO STAFF"
+			newEmbed.Description += fmt.Sprintf("\n\n**Stato:** Rifiutato da <@%s>", i.Member.User.ID)
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseUpdateMessage,
+			Data: &discordgo.InteractionResponseData{
+				Embeds:     []*discordgo.MessageEmbed{&newEmbed},
+				Components: []discordgo.MessageComponent{},
+			},
+		})
+
+		privateChannel, err := s.UserChannelCreate(targetUserID)
+		if err == nil {
+			if azione == "yes" {
+				s.ChannelMessageSend(privateChannel.ID, "🎉 La tua richiesta inviata nel server è stata **APPROVATA** dallo staff!")
+			} else {
+				s.ChannelMessageSend(privateChannel.ID, "❌ La tua richiesta inviata nel server è stata **RIFIUTATA** dallo staff.")
+			}
+		}
+		return
+	}
+
+	// Menu di selezione /setup server
 	if customID == "setup_server_select" {
 		selectedCategory := "cfg_cittadinanza"
 		if len(i.MessageComponentData().Values) > 0 {
 			selectedCategory = i.MessageComponentData().Values[0]
 		}
 
-		// Menu nativo per scegliere il canale del pannello (#)
 		channelSelectPanel := discordgo.SelectMenu{
 			CustomID:    "sel_chan_panel_" + selectedCategory,
 			Placeholder: "Seleziona il canale del comando (#)...",
@@ -322,7 +368,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		}
 
-		// Menu nativo per scegliere il canale dove inviare i risultati/esiti (#)
 		channelSelectEsiti := discordgo.SelectMenu{
 			CustomID:    "sel_chan_esiti_" + selectedCategory,
 			Placeholder: "Seleziona il canale dei risultati/esiti (#)...",
@@ -332,7 +377,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		}
 
-		// Menu nativo per scegliere il ruolo autorizzato (@)
 		roleSelectAuth := discordgo.SelectMenu{
 			CustomID:    "sel_role_auth_" + selectedCategory,
 			Placeholder: "Seleziona il ruolo autorizzato (@)...",
@@ -354,7 +398,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// 2. Salvataggio automatico delle scelte fatte dai menu nativi di Discord
+	// Salvataggio canali/ruoli scelti
 	if strings.HasPrefix(customID, "sel_chan_panel_") || strings.HasPrefix(customID, "sel_chan_esiti_") || strings.HasPrefix(customID, "sel_role_auth_") {
 		values := i.MessageComponentData().Values
 		if len(values) > 0 {
@@ -383,7 +427,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// 3. Gestione bottoni utenti (Banche, Cittadinanza, Arresti)
+	// Gestione bottoni utenti
 	switch customID {
 	case "btn_apri_conto":
 		selectBanche := discordgo.SelectMenu{
@@ -396,20 +440,13 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				{Label: "UniCredit", Value: "unicredit", Emoji: &discordgo.ComponentEmoji{Name: "🔴"}},
 				{Label: "BPER Banca", Value: "bper", Emoji: &discordgo.ComponentEmoji{Name: "🟦"}},
 				{Label: "Banco BPM", Value: "bpm", Emoji: &discordgo.ComponentEmoji{Name: "🟢"}},
-				{Label: "Monte dei Paschi di Siena", Value: "mps", Emoji: &discordgo.ComponentEmoji{Name: "🏰"}},
-				{Label: "Credit Agricole Italia", Value: "credit_agricole", Emoji: &discordgo.ComponentEmoji{Name: "🌾"}},
 				{Label: "Revolut", Value: "revolut", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
-				{Label: "HYPE (Banca Sella)", Value: "hype", Emoji: &discordgo.ComponentEmoji{Name: "⚡"}},
-				{Label: "N26", Value: "n26", Emoji: &discordgo.ComponentEmoji{Name: "🖤"}},
-				{Label: "FinecoBank", Value: "fineco", Emoji: &discordgo.ComponentEmoji{Name: "📈"}},
-				{Label: "BBVA Italia", Value: "bbva", Emoji: &discordgo.ComponentEmoji{Name: "🟡"}},
-				{Label: "Buddybank", Value: "buddybank", Emoji: &discordgo.ComponentEmoji{Name: "📱"}},
 			},
 		}
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Scegli la banca con cui desideri aprire il conto corrente:",
+				Content: "Scegli la banca con cui desideri aprire il conto corrente (riceverai subito **€ 7.000** di bonus):",
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{selectBanche}}},
 			},
@@ -445,6 +482,19 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
+	case "btn_richiedi_porto_darmi":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseModal,
+			Data: &discordgo.InteractionResponseData{
+				CustomID: "modal_porto_darmi",
+				Title:    "Richiesta Licenza Porto d'Armi",
+				Components: []discordgo.MessageComponent{
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_nome_cognome_pda", Label: "Nome e Cognome RP", Style: discordgo.TextInputShort, Required: true}}},
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_motivazione_pda", Label: "Motivazione Richiesta", Style: discordgo.TextInputParagraph, Required: true}}},
+				},
+			},
+		})
+
 	case "btn_registra_arresto":
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseModal,
@@ -461,26 +511,109 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		})
 
 	case "btn_riscuoti_stipendio":
+		userID := i.Member.User.ID
+		account, exists := userBankAccounts[userID]
+		if !exists {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "❌ Devi prima aprire un conto corrente bancario usando il pannello `/setup apri-conto` per poter riscuotere la busta paga!",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		stipendioAmount := roleStipendi["default_stipendio"]
+		for _, roleID := range i.Member.Roles {
+			if amount, ok := roleStipendi[roleID]; ok {
+				stipendioAmount = amount
+				break
+			}
+		}
+
+		account.Balance += stipendioAmount
+		userBankAccounts[userID] = account
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "✅ **Stipendio Riscosso!**", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{
+				Content: fmt.Sprintf("✅ **Busta Paga Riscossa con Successo!** Aggiunti **€ %d** al tuo conto corrente. Saldo totale: `€ %d`", stipendioAmount, account.Balance),
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
 		})
+	}
+}
+
+// Pubblica il messaggio del pannello pubblico nel canale specifico
+func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
+	switch serviceKey {
+	case "apri-conto":
+		embed := &discordgo.MessageEmbed{
+			Title:       "🏛️ APERTURA CONTO CORRENTE - ROME ITALY 2.0",
+			Description: "Clicca sul bottone qui sotto per scegliere il tuo istituto bancario e ricevere **€ 7.000** di bonus benvenuto sul tuo conto!",
+			Color:       0x2ECC71,
+		}
+		btn := discordgo.Button{Label: "Apri Conto Corrente", Style: discordgo.SuccessButton, CustomID: "btn_apri_conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}}
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{btn}}}})
+
+	case "porto-darmi":
+		embed := &discordgo.MessageEmbed{
+			Title:       "🔫 RICHIESTA PORTO D'ARMI - ROME ITALY 2.0",
+			Description: "Clicca sul bottone per inviare la richiesta di licenza porto d'armi alle autorità competenti.",
+			Color:       0xE67E22,
+		}
+		btn := discordgo.Button{Label: "Richiedi Porto d'Armi", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_porto_darmi", Emoji: &discordgo.ComponentEmoji{Name: "📜"}}
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{btn}}}})
+
+	case "busta-paga":
+		embed := &discordgo.MessageEmbed{
+			Title:       "💼 RISCOSSIONE BUSTA PAGA - ROME ITALY 2.0",
+			Description: "Clicca sul bottone per riscuotere lo stipendio associato al tuo ruolo lavorativo.",
+			Color:       0xF1C40F,
+		}
+		btn := discordgo.Button{Label: "Riscuoti Busta Paga", Style: discordgo.PrimaryButton, CustomID: "btn_riscuoti_stipendio", Emoji: &discordgo.ComponentEmoji{Name: "💵"}}
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{btn}}}})
+
+	case "cittadinanza":
+		embed := &discordgo.MessageEmbed{
+			Title:       "🇮🇹 ANAGRAFE CENTRALE - ROME ITALY 2.0",
+			Description: "Richiedi la tua Carta d'Identità e la Cittadinanza ufficiali.",
+			Color:       0x3498DB,
+		}
+		btn := discordgo.Button{Label: "Richiedi Cittadinanza", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🆔"}}
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{btn}}}})
+
+	case "registra-arresto":
+		embed := &discordgo.MessageEmbed{
+			Title:       "🚨 BANCA DATI POLIZIA DI STATO / CARABINIERI",
+			Description: "Compila il verbale dei fermi e degli arresti eseguiti durante il servizio.",
+			Color:       0xE74C3C,
+		}
+		btn := discordgo.Button{Label: "Registra Arresto", Style: discordgo.DangerButton, CustomID: "btn_registra_arresto", Emoji: &discordgo.ComponentEmoji{Name: "📝"}}
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{btn}}}})
 	}
 }
 
 func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.ModalSubmitData().CustomID
 
-	// Invio scheda apertura conto nel canale esiti bancario scelto
 	if strings.HasPrefix(customID, "modal_conferma_conto_") {
 		banca := strings.TrimPrefix(customID, "modal_conferma_conto_")
 		data := i.ModalSubmitData()
 		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		userID := i.Member.User.ID
+
+		userBankAccounts[userID] = BankAccount{
+			OwnerName: nomeRP,
+			BankName:  banca,
+			Balance:   7000,
+		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "🎉 **Conto Corrente Aperto con Successo!** La richiesta è stata inviata.",
+				Content: "🎉 **Conto Corrente Aperto con Successo!** Ti sono stati accreditati **€ 7.000** di bonus benvenuto. Verifica il saldo con `/conto`.",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -490,27 +623,89 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			targetChannel = i.ChannelID
 		}
 
-		embedEsito := &discordgo.MessageEmbed{
-			Title:       "💳 NUOVA APERTURA CONTO BANCARIO",
-			Color:       0x2ECC71,
-			Description: fmt.Sprintf("**Utente:** <@%s>\n**Nome & Cognome RP:** %s\n**Banca:** %s", i.Member.User.ID, nomeRP, strings.ToUpper(banca)),
+		authRole := serverConfigs["apri_conto"].AuthRoleID
+		pingText := "@everyone"
+		if authRole != "" {
+			pingText = fmt.Sprintf("<@&%s>", authRole)
 		}
-		s.ChannelMessageSendEmbed(targetChannel, embedEsito)
+
+		embedEsito := &discordgo.MessageEmbed{
+			Title:       "💳 NUOVA RICHIESTA APERTURA CONTO BANCARIO",
+			Color:       0x2ECC71,
+			Description: fmt.Sprintf("**Richiedente:** <@%s>\n**Nome & Cognome RP:** %s\n**Banca:** %s\n\n*Saldo accreditato:* € 7.000", userID, nomeRP, strings.ToUpper(banca)),
+		}
+
+		btnYes := discordgo.Button{Label: "Accetta (Sì)", Style: discordgo.SuccessButton, CustomID: "approve_yes_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "✅"}}
+		btnNo := discordgo.Button{Label: "Rifiuta (No)", Style: discordgo.DangerButton, CustomID: "approve_no_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "❌"}}
+
+		s.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+			Content: pingText,
+			Embeds:  []*discordgo.MessageEmbed{embedEsito},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{btnYes, btnNo}},
+			},
+		})
 		return
 	}
 
 	switch customID {
-	// Invio scheda cittadinanza nel canale esiti anagrafe scelto
+	case "modal_porto_darmi":
+		data := i.ModalSubmitData()
+		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		motivazione := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		userID := i.Member.User.ID
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "📜 **Richiesta Porto d'Armi Inviata!** Sarà valutata dalle autorità.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		targetChannel := serverConfigs["porto_darmi"].EsitiChannelID
+		if targetChannel == "" {
+			targetChannel = i.ChannelID
+		}
+
+		authRole := serverConfigs["porto_darmi"].AuthRoleID
+		pingText := "@everyone"
+		if authRole != "" {
+			pingText = fmt.Sprintf("<@&%s>", authRole)
+		}
+
+		embedPda := &discordgo.MessageEmbed{
+			Title: "🔫 RICHIESTA LICENZA PORTO D'ARMI",
+			Color: 0xE67E22,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Nome & Cognome RP", Value: nomeRP, Inline: true},
+				{Name: "Motivazione", Value: motivazione, Inline: false},
+			},
+		}
+
+		btnYes := discordgo.Button{Label: "Accetta (Sì)", Style: discordgo.SuccessButton, CustomID: "approve_yes_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "✅"}}
+		btnNo := discordgo.Button{Label: "Rifiuta (No)", Style: discordgo.DangerButton, CustomID: "approve_no_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "❌"}}
+
+		s.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+			Content: pingText,
+			Embeds:  []*discordgo.MessageEmbed{embedPda},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{btnYes, btnNo}},
+			},
+		})
+
 	case "modal_cittadinanza":
 		data := i.ModalSubmitData()
 		nomeRP := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		cognomeRP := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		dataNascita := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		userID := i.Member.User.ID
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "🇮🇹 **Richiesta Cittadinanza Registrata!** Inviata nel canale di raccolta esiti.",
+				Content: "🇮🇹 **Richiesta Cittadinanza Registrata!** Inviata nel canale esiti.",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -520,25 +715,41 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			targetChannel = i.ChannelID
 		}
 
+		authRole := serverConfigs["cittadinanza"].AuthRoleID
+		pingText := "@everyone"
+		if authRole != "" {
+			pingText = fmt.Sprintf("<@&%s>", authRole)
+		}
+
 		embedAnagrafe := &discordgo.MessageEmbed{
 			Title: "🇮🇹 NUOVA RICHIESTA CITTADINANZA / CARTA D'IDENTITÀ",
 			Color: 0x3498DB,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
 				{Name: "Nome RP", Value: nomeRP, Inline: true},
 				{Name: "Cognome RP", Value: cognomeRP, Inline: true},
 				{Name: "Data di Nascita", Value: dataNascita, Inline: true},
 			},
 		}
-		s.ChannelMessageSendEmbed(targetChannel, embedAnagrafe)
 
-	// Invio verbale arresto nel canale esiti registro FDO scelto
+		btnYes := discordgo.Button{Label: "Accetta (Sì)", Style: discordgo.SuccessButton, CustomID: "approve_yes_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "✅"}}
+		btnNo := discordgo.Button{Label: "Rifiuta (No)", Style: discordgo.DangerButton, CustomID: "approve_no_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "❌"}}
+
+		s.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+			Content: pingText,
+			Embeds:  []*discordgo.MessageEmbed{embedAnagrafe},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{btnYes, btnNo}},
+			},
+		})
+
 	case "modal_registra_arresto":
 		data := i.ModalSubmitData()
 		utenteArrestato := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		reati := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		prigione := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		cauzione := data.Components[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		userID := i.Member.User.ID
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -553,17 +764,33 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			targetChannel = i.ChannelID
 		}
 
+		authRole := serverConfigs["police"].AuthRoleID
+		pingText := "@everyone"
+		if authRole != "" {
+			pingText = fmt.Sprintf("<@&%s>", authRole)
+		}
+
 		embedArresto := &discordgo.MessageEmbed{
 			Title: "🚨 VERBALE D'ARRESTO UFFICIALE",
 			Color: 0xE74C3C,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Agente", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+				{Name: "Agente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
 				{Name: "Arrestato", Value: utenteArrestato, Inline: true},
 				{Name: "Pena", Value: prigione, Inline: true},
 				{Name: "Cauzione", Value: cauzione, Inline: true},
 				{Name: "Reati", Value: reati, Inline: false},
 			},
 		}
-		s.ChannelMessageSendEmbed(targetChannel, embedArresto)
+
+		btnYes := discordgo.Button{Label: "Approva Verbale (Sì)", Style: discordgo.SuccessButton, CustomID: "approve_yes_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "✅"}}
+		btnNo := discordgo.Button{Label: "Annulla Verbale (No)", Style: discordgo.DangerButton, CustomID: "approve_no_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "❌"}}
+
+		s.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+			Content: pingText,
+			Embeds:  []*discordgo.MessageEmbed{embedArresto},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{btnYes, btnNo}},
+			},
+		})
 	}
 }
