@@ -1,4 +1,4 @@
-package main
+ package main
 
 import (
 	"fmt"
@@ -8,34 +8,65 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-// Struttura per salvare in memoria i canali e i ruoli configurati per ogni comando
+// Struttura configurazione canali e ruoli
 type ServerConfig struct {
 	PanelChannelID string
 	EsitiChannelID string
 	AuthRoleID     string
 }
 
-// Struttura dati conto corrente utente
+// Strutture dati salvate
 type BankAccount struct {
 	OwnerName  string
 	RobloxName string
 	BankName   string
 	Balance    int
+	LastPayday time.Time
+}
+
+type AnagrafeRecord struct {
+	UserID      string
+	RobloxUser  string
+	NomeRP      string
+	CognomeRP   string
+	DataNascita string
+}
+
+type PortoDarmiRecord struct {
+	UserID      string
+	RobloxUser  string
+	NomeRP      string
+	Motivazione string
+}
+
+type ImmatricolazioneRecord struct {
+	UserID      string
+	RobloxUser  string
+	Targa       string
+	ModelloAuto string
 }
 
 // Database in memoria
 var serverConfigs = make(map[string]ServerConfig)
-var userBankAccounts = make(map[string]BankAccount) // Key: Discord User ID
+var userBankAccounts = make(map[string]BankAccount)
+var dbAnagrafe = make(map[string]AnagrafeRecord)
+var dbPortoDarmi = make(map[string]PortoDarmiRecord)
+var dbImmatricolazioni = make(map[string]ImmatricolazioneRecord)
+
+// Stipendi multipli associati ai ruoli (RoleID -> Importo Stipendio)
 var roleStipendi = map[string]int{
-	"default_stipendio": 1500,
+	"ID_RUOLO_AGENTE": 1500,
+	"ID_RUOLO_MEDICO":  2000,
+	"ID_RUOLO_CAPO":    3500,
+	"default_stipendio": 800, // Stipendio base se non ha ruoli specifici
 }
 
 func main() {
-	// Server HTTP per Render (mantiene il bot sempre attivo sulla porta 10000)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000"
@@ -50,7 +81,6 @@ func main() {
 		}
 	}()
 
-	// Recupera e pulisce il token Discord
 	token := strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
 	if token == "" {
 		log.Println("⚠️ ERRORE: La variabile d'ambiente DISCORD_TOKEN non è impostata!")
@@ -88,6 +118,27 @@ func registerCommands(s *discordgo.Session) {
 		{
 			Name:        "conto",
 			Description: "Visualizza il saldo del tuo conto corrente bancario e la banca associata",
+		},
+		{
+			Name:        "visualizza",
+			Description: "Comandi di visualizzazione database per lo Staff",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "anagrafe",
+					Description: "Visualizza tutte le carte d'identità registrate",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "porto-darmi",
+					Description: "Visualizza tutte le richieste di porto d'armi",
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "immatricolazioni",
+					Description: "Visualizza tutti i veicoli immatricolati",
+				},
+			},
 		},
 		{
 			Name:        "setup",
@@ -198,6 +249,54 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	if data.Name == "visualizza" {
+		sub := data.Options[0].Name
+		switch sub {
+		case "anagrafe":
+			text := "📋 **LISTA CITTADINANZA / ANAGRAFE REGISTRATA:**\n\n"
+			if len(dbAnagrafe) == 0 {
+				text += "*Nessuna carta d'identità registrata.*"
+			} else {
+				for _, rec := range dbAnagrafe {
+					text += fmt.Sprintf("• **RP:** %s %s | **Roblox:** `@%s` | **Discord:** <@%s>\n", rec.NomeRP, rec.CognomeRP, rec.RobloxUser, rec.UserID)
+				}
+			}
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{Content: text, Flags: discordgo.MessageFlagsEphemeral},
+			})
+
+		case "porto-darmi":
+			text := "🔫 **LISTA PORTO D'ARMI RICHIESTI:**\n\n"
+			if len(dbPortoDarmi) == 0 {
+				text += "*Nessuna richiesta di porto d'armi.*"
+			} else {
+				for _, rec := range dbPortoDarmi {
+					text += fmt.Sprintf("• **RP:** %s | **Roblox:** `@%s` | **Motivazione:** %s\n", rec.NomeRP, rec.RobloxUser, rec.Motivazione)
+				}
+			}
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{Content: text, Flags: discordgo.MessageFlagsEphemeral},
+			})
+
+		case "immatricolazioni":
+			text := "🚗 **LISTA VEICOLI IMMATRICOLATI (PRA):**\n\n"
+			if len(dbImmatricolazioni) == 0 {
+				text += "*Nessun veicolo immatricolato.*"
+			} else {
+				for _, rec := range dbImmatricolazioni {
+					text += fmt.Sprintf("• **Modello:** %s | **Targa:** `%s` | **Roblox:** `@%s`\n", rec.ModelloAuto, rec.Targa, rec.RobloxUser)
+				}
+			}
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{Content: text, Flags: discordgo.MessageFlagsEphemeral},
+			})
+		}
+		return
+	}
+
 	options := data.Options
 	if len(options) == 0 {
 		return
@@ -285,7 +384,6 @@ func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) 
 func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
 
-	// Pressione del bottone "Invia Pannello nel Canale"
 	if strings.HasPrefix(customID, "send_panel_to_channel_") {
 		serviceKey := strings.TrimPrefix(customID, "send_panel_to_channel_")
 
@@ -306,7 +404,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Approva/Rifiuta Staff (Sì / No)
 	if strings.HasPrefix(customID, "approve_yes_") || strings.HasPrefix(customID, "approve_no_") {
 		parts := strings.Split(customID, "_")
 		azione := parts[1]
@@ -344,7 +441,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Selezione dal menu generale di /setup server
 	if customID == "setup_server_select" {
 		selectedCategory := "cittadinanza"
 		if len(i.MessageComponentData().Values) > 0 {
@@ -390,7 +486,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Salvataggio canali e ruoli nel database in memoria
 	if strings.HasPrefix(customID, "selchanpanel_") || strings.HasPrefix(customID, "selchanesiti_") || strings.HasPrefix(customID, "selroleauth_") {
 		values := i.MessageComponentData().Values
 		if len(values) > 0 {
@@ -426,7 +521,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Gestione bottoni interattivi
 	switch customID {
 	case "btn_apri_conto":
 		selectBanche := discordgo.SelectMenu{
@@ -497,6 +591,20 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
+	case "btn_immatricolazione":
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseModal,
+			Data: &discordgo.InteractionResponseData{
+				CustomID: "modal_immatricolazione",
+				Title:    "Immatricolazione Veicolo (PRA)",
+				Components: []discordgo.MessageComponent{
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_roblox_imm", Label: "Username Roblox", Style: discordgo.TextInputShort, Required: true}}},
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_modello_auto", Label: "Modello Veicolo", Style: discordgo.TextInputShort, Required: true}}},
+					discordgo.ActionsRow{Components: []discordgo.MessageComponent{discordgo.TextInput{CustomID: "input_targa", Label: "Targa Desiderata", Style: discordgo.TextInputShort, Required: true}}},
+				},
+			},
+		})
+
 	case "btn_registra_arresto":
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseModal,
@@ -526,6 +634,22 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
+		// Controllo riscossione 1 volta a settimana (7 giorni)
+		if time.Since(account.LastPayday) < 7*24*time.Hour {
+			rimanente := (7 * 24 * time.Hour) - time.Since(account.LastPayday)
+			giorni := int(rimanente.Hours() / 24)
+			ore := int(int(rimanente.Hours()) % 24)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: fmt.Sprintf("⏳ **Hai già riscosso la busta paga questa settimana!** Potrai riscuoterla nuovamente tra **%d giorni e %d ore**.", giorni, ore),
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+
+		// Calcolo stipendio in base ai ruoli multipli configurati
 		stipendioAmount := roleStipendi["default_stipendio"]
 		for _, roleID := range i.Member.Roles {
 			if amount, ok := roleStipendi[roleID]; ok {
@@ -535,6 +659,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 
 		account.Balance += stipendioAmount
+		account.LastPayday = time.Now()
 		userBankAccounts[userID] = account
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -570,7 +695,7 @@ func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey strin
 	case "busta-paga":
 		embed := &discordgo.MessageEmbed{
 			Title:       "💼 RISCOSSIONE BUSTA PAGA - ROME ITALY 2.0",
-			Description: "Clicca sul bottone per riscuotere lo stipendio associato al tuo ruolo lavorativo.",
+			Description: "Clicca sul bottone per riscuotere lo stipendio settimanale associato al tuo ruolo lavorativo.",
 			Color:       0xF1C40F,
 		}
 		btn := discordgo.Button{Label: "Riscuoti Busta Paga", Style: discordgo.PrimaryButton, CustomID: "btn_riscuoti_stipendio", Emoji: &discordgo.ComponentEmoji{Name: "💵"}}
@@ -583,6 +708,15 @@ func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey strin
 			Color:       0x3498DB,
 		}
 		btn := discordgo.Button{Label: "Richiedi Cittadinanza", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🆔"}}
+		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{btn}}}})
+
+	case "immatricolazione":
+		embed := &discordgo.MessageEmbed{
+			Title:       "🚗 UFFICIO PRA - IMMATRICOLAZIONE VEICOLI",
+			Description: "Clicca sul bottone per registrare e immatricolare ufficialmente il tuo veicolo nel server.",
+			Color:       0x9B59B6,
+		}
+		btn := discordgo.Button{Label: "Immatricola Veicolo", Style: discordgo.PrimaryButton, CustomID: "btn_immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚘"}}
 		s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}, Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{btn}}}})
 
 	case "registra-arresto":
@@ -611,6 +745,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			RobloxName: robloxUser,
 			BankName:   banca,
 			Balance:    7000,
+			LastPayday: time.Time{}, // Può riscuotere subito
 		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -658,6 +793,13 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		robloxUser := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		motivazione := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		userID := i.Member.User.ID
+
+		dbPortoDarmi[userID] = PortoDarmiRecord{
+			UserID:      userID,
+			RobloxUser:  robloxUser,
+			NomeRP:      nomeRP,
+			Motivazione: motivazione,
+		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -708,6 +850,14 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		dataNascita := data.Components[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		userID := i.Member.User.ID
 
+		dbAnagrafe[userID] = AnagrafeRecord{
+			UserID:      userID,
+			RobloxUser:  robloxUser,
+			NomeRP:      nomeRP,
+			CognomeRP:   cognomeRP,
+			DataNascita: dataNascita,
+		}
+
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -745,6 +895,61 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
 			Content: pingText,
 			Embeds:  []*discordgo.MessageEmbed{embedAnagrafe},
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{btnYes, btnNo}},
+			},
+		})
+
+	case "modal_immatricolazione":
+		data := i.ModalSubmitData()
+		robloxUser := data.Components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		modelloAuto := data.Components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		targa := data.Components[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+		userID := i.Member.User.ID
+
+		dbImmatricolazioni[targa] = ImmatricolazioneRecord{
+			UserID:      userID,
+			RobloxUser:  robloxUser,
+			Targa:       targa,
+			ModelloAuto: modelloAuto,
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "🚗 **Immatricolazione Inviata!** Inserita nel registro PRA.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		targetChannel := serverConfigs["immatricolazione"].EsitiChannelID
+		if targetChannel == "" {
+			targetChannel = i.ChannelID
+		}
+
+		authRole := serverConfigs["immatricolazione"].AuthRoleID
+		pingText := "@everyone"
+		if authRole != "" {
+			pingText = fmt.Sprintf("<@&%s>", authRole)
+		}
+
+		embedImm := &discordgo.MessageEmbed{
+			Title: "🚗 NUOVA RICHIESTA IMMATRICOLAZIONE VEICOLO",
+			Color: 0x9B59B6,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Richiedente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Utente Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
+				{Name: "Modello Veicolo", Value: modelloAuto, Inline: true},
+				{Name: "Targa Richiesta", Value: fmt.Sprintf("`%s`", targa), Inline: true},
+			},
+		}
+
+		btnYes := discordgo.Button{Label: "Accetta (Sì)", Style: discordgo.SuccessButton, CustomID: "approve_yes_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "✅"}}
+		btnNo := discordgo.Button{Label: "Rifiuta (No)", Style: discordgo.DangerButton, CustomID: "approve_no_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "❌"}}
+
+		s.ChannelMessageSendComplex(targetChannel, &discordgo.MessageSend{
+			Content: pingText,
+			Embeds:  []*discordgo.MessageEmbed{embedImm},
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{btnYes, btnNo}},
 			},
