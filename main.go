@@ -1,4 +1,4 @@
- package main
+package main
 
 import (
 	"fmt"
@@ -13,14 +13,15 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// Struttura configurazione canali e ruoli
+// Struttura configurazione canali, ruoli e stipendi multipli per il server
 type ServerConfig struct {
 	PanelChannelID string
 	EsitiChannelID string
 	AuthRoleID     string
+	RoleSalaries   map[string]int // Mappa RoleID -> Importo Stipendio
 }
 
-// Strutture dati salvate
+// Strutture dati salvate nel database in memoria
 type BankAccount struct {
 	OwnerName  string
 	RobloxName string
@@ -52,18 +53,22 @@ type ImmatricolazioneRecord struct {
 }
 
 // Database in memoria
-var serverConfigs = make(map[string]ServerConfig)
+var serverConfigs = make(map[string]*ServerConfig)
 var userBankAccounts = make(map[string]BankAccount)
 var dbAnagrafe = make(map[string]AnagrafeRecord)
 var dbPortoDarmi = make(map[string]PortoDarmiRecord)
 var dbImmatricolazioni = make(map[string]ImmatricolazioneRecord)
 
-// Stipendi multipli associati ai ruoli (RoleID -> Importo Stipendio)
-var roleStipendi = map[string]int{
-	"ID_RUOLO_AGENTE": 1500,
-	"ID_RUOLO_MEDICO":  2000,
-	"ID_RUOLO_CAPO":    3500,
-	"default_stipendio": 800, // Stipendio base se non ha ruoli specifici
+// Stipendio base di fallback se l'utente non ha un ruolo specifico configurato
+var defaultStipendio = 800
+
+func getOrCreateConfig(key string) *ServerConfig {
+	if serverConfigs[key] == nil {
+		serverConfigs[key] = &ServerConfig{
+			RoleSalaries: make(map[string]int),
+		}
+	}
+	return serverConfigs[key]
 }
 
 func main() {
@@ -313,7 +318,8 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 func sendPanelPreview(s *discordgo.Session, i *discordgo.InteractionCreate, serviceKey string) {
-	targetChannel := serverConfigs[serviceKey].PanelChannelID
+	cfg := getOrCreateConfig(serviceKey)
+	targetChannel := cfg.PanelChannelID
 	var channelInfo string
 	if targetChannel == "" {
 		channelInfo = "⚠️ *Nessun canale impostato in `/setup server`. Verrà inviato in questo canale.*"
@@ -387,7 +393,8 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if strings.HasPrefix(customID, "send_panel_to_channel_") {
 		serviceKey := strings.TrimPrefix(customID, "send_panel_to_channel_")
 
-		targetChannel := serverConfigs[serviceKey].PanelChannelID
+		cfg := getOrCreateConfig(serviceKey)
+		targetChannel := cfg.PanelChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
@@ -500,7 +507,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				servizioKey = strings.TrimPrefix(customID, "selroleauth_")
 			}
 
-			cfg := serverConfigs[servizioKey]
+			cfg := getOrCreateConfig(servizioKey)
 			if strings.HasPrefix(customID, "selchanpanel_") {
 				cfg.PanelChannelID = valoreScelto
 			} else if strings.HasPrefix(customID, "selchanesiti_") {
@@ -508,7 +515,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			} else if strings.HasPrefix(customID, "selroleauth_") {
 				cfg.AuthRoleID = valoreScelto
 			}
-			serverConfigs[servizioKey] = cfg
 		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -634,7 +640,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		// Controllo riscossione 1 volta a settimana (7 giorni)
+		// Controllo 1 volta a settimana (7 giorni)
 		if time.Since(account.LastPayday) < 7*24*time.Hour {
 			rimanente := (7 * 24 * time.Hour) - time.Since(account.LastPayday)
 			giorni := int(rimanente.Hours() / 24)
@@ -649,10 +655,13 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		// Calcolo stipendio in base ai ruoli multipli configurati
-		stipendioAmount := roleStipendi["default_stipendio"]
+		// Calcolo stipendio in base alla configurazione del server (supporta più ruoli con stipendi diversi)
+		cfg := getOrCreateConfig("busta-paga")
+		stipendioAmount := defaultStipendio
+		
+		// Cerca tra i ruoli dell'utente se c'è un corrispettivo configurato nel server
 		for _, roleID := range i.Member.Roles {
-			if amount, ok := roleStipendi[roleID]; ok {
+			if amount, ok := cfg.RoleSalaries[roleID]; ok {
 				stipendioAmount = amount
 				break
 			}
@@ -745,7 +754,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			RobloxName: robloxUser,
 			BankName:   banca,
 			Balance:    7000,
-			LastPayday: time.Time{}, // Può riscuotere subito
+			LastPayday: time.Time{},
 		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -756,12 +765,13 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
-		targetChannel := serverConfigs["apri-conto"].EsitiChannelID
+		cfg := getOrCreateConfig("apri-conto")
+		targetChannel := cfg.EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["apri-conto"].AuthRoleID
+		authRole := cfg.AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
@@ -809,12 +819,13 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
-		targetChannel := serverConfigs["porto-darmi"].EsitiChannelID
+		cfg := getOrCreateConfig("porto-darmi")
+		targetChannel := cfg.EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["porto-darmi"].AuthRoleID
+		authRole := cfg.AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
@@ -866,12 +877,13 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
-		targetChannel := serverConfigs["cittadinanza"].EsitiChannelID
+		cfg := getOrCreateConfig("cittadinanza")
+		targetChannel := cfg.EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["cittadinanza"].AuthRoleID
+		authRole := cfg.AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
@@ -922,12 +934,13 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			},
 		})
 
-		targetChannel := serverConfigs["immatricolazione"].EsitiChannelID
+		cfg := getOrCreateConfig("immatricolazione")
+		targetChannel := cfg.EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["immatricolazione"].AuthRoleID
+		authRole := cfg.AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
@@ -963,20 +976,13 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		cauzione := data.Components[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 		userID := i.Member.User.ID
 
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "🚨 **Verbale Registrato!** Inviato nel canale del registro ufficiale.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-
-		targetChannel := serverConfigs["registra-arresto"].EsitiChannelID
+		cfg := getOrCreateConfig("registra-arresto")
+		targetChannel := cfg.EsitiChannelID
 		if targetChannel == "" {
 			targetChannel = i.ChannelID
 		}
 
-		authRole := serverConfigs["registra-arresto"].AuthRoleID
+		authRole := cfg.AuthRoleID
 		pingText := "@everyone"
 		if authRole != "" {
 			pingText = fmt.Sprintf("<@&%s>", authRole)
@@ -993,6 +999,14 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				{Name: "Reati", Value: reati, Inline: false},
 			},
 		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "🚨 **Verbale Registrato!** Inviato nel canale del registro ufficiale.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
 
 		btnYes := discordgo.Button{Label: "Approva Verbale (Sì)", Style: discordgo.SuccessButton, CustomID: "approve_yes_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "✅"}}
 		btnNo := discordgo.Button{Label: "Annulla Verbale (No)", Style: discordgo.DangerButton, CustomID: "approve_no_" + userID, Emoji: &discordgo.ComponentEmoji{Name: "❌"}}
