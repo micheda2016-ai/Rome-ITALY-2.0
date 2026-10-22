@@ -284,6 +284,70 @@ func registerCommands(s *discordgo.Session) {
 			Description: "Visualizza il saldo del tuo conto corrente bancario",
 		},
 		{
+			Name:                     "ban",
+			Description:              "Emetti un provvedimento di ban per un utente",
+			DefaultMemberPermissions: &staffPerm,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "utente",
+					Description: "L'utente Discord da bannare",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "roblox",
+					Description: "Username Roblox dell'utente",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "motivo",
+					Description: "Motivazione del ban",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "durata",
+					Description: "Durata del ban (es. Permanente, 7 giorni)",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:                     "warn",
+			Description:              "Emetti un avvertimento (warn) a un utente",
+			DefaultMemberPermissions: &staffPerm,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "utente",
+					Description: "L'utente Discord da ammonire",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "roblox",
+					Description: "Username Roblox dell'utente",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "motivo",
+					Description: "Motivazione del warn",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "numero",
+					Description: "Numero del warn (da 1 a 3)",
+					Required:    true,
+					MinValue:    func() *float64 { v := float64(1); return &v }(),
+					MaxValue:    3,
+				},
+			},
+		},
+		{
 			Name:                     "visualizza",
 			Description:              "Comandi di visualizzazione database per lo Staff",
 			DefaultMemberPermissions: &staffPerm,
@@ -312,12 +376,12 @@ func registerCommands(s *discordgo.Session) {
 		},
 	}
 
-	// Cancella i comandi GLOBALI vecchi (causa dei comandi doppi)
+	// Cancella i comandi GLOBALI vecchi
 	if _, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", []*discordgo.ApplicationCommand{}); err != nil {
 		log.Printf("Errore pulizia comandi globali: %v", err)
 	}
 
-	// Sovrascrive tutti i comandi del server: niente comandi vecchi rimasti in giro
+	// Sovrascrive tutti i comandi del server
 	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, guildID, commands)
 	if err != nil {
 		log.Printf("Errore nella registrazione dei comandi: %v", err)
@@ -383,6 +447,111 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				Embeds: []*discordgo.MessageEmbed{embed},
 				Flags:  discordgo.MessageFlagsEphemeral,
 			},
+		})
+		return
+	}
+
+	// --- Comando /ban ---
+	if data.Name == "ban" {
+		var targetUser *discordgo.User
+		var roblox, motivo, durata string
+
+		for _, opt := range data.Options {
+			switch opt.Name {
+			case "utente":
+				targetUser = opt.UserValue(s)
+			case "roblox":
+				roblox = opt.StringValue()
+			case "motivo":
+				motivo = opt.StringValue()
+			case "durata":
+				durata = opt.StringValue()
+			}
+		}
+
+		if targetUser == nil {
+			respond(s, i, "❌ Utente non valido.")
+			return
+		}
+
+		avatarURL := targetUser.AvatarURL("128")
+
+		embed := &discordgo.MessageEmbed{
+			Title:     "🔨 PROVVEDIMENTO DI BAN",
+			Color:     0xE74C3C,
+			Thumbnail: &discordgo.MessageEmbedThumbnail{URL: avatarURL},
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Utente Discord", Value: fmt.Sprintf("<@%s>", targetUser.ID), Inline: true},
+				{Name: "Username Roblox", Value: fmt.Sprintf("`@%s`", roblox), Inline: true},
+				{Name: "Durata", Value: durata, Inline: true},
+				{Name: "Motivazione", Value: truncate(motivo, 1000), Inline: false},
+				{Name: "Moderatore", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+			},
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "🔨 **Provvedimento di Ban registrato ed emesso con successo!**",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		s.ChannelMessageSendComplex(esitiChannel("ban", i.ChannelID), &discordgo.MessageSend{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		})
+		return
+	}
+
+	// --- Comando /warn ---
+	if data.Name == "warn" {
+		var targetUser *discordgo.User
+		var roblox, motivo string
+		var numero int
+
+		for _, opt := range data.Options {
+			switch opt.Name {
+			case "utente":
+				targetUser = opt.UserValue(s)
+			case "roblox":
+				roblox = opt.StringValue()
+			case "motivo":
+				motivo = opt.StringValue()
+			case "numero":
+				numero = int(opt.IntValue())
+			}
+		}
+
+		if targetUser == nil {
+			respond(s, i, "❌ Utente non valido.")
+			return
+		}
+
+		avatarURL := targetUser.AvatarURL("128")
+
+		embed := &discordgo.MessageEmbed{
+			Title:     fmt.Sprintf("⚠️ AVVERTIMENTO (WARN %d/3)", numero),
+			Color:     0xF1C40F,
+			Thumbnail: &discordgo.MessageEmbedThumbnail{URL: avatarURL},
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Utente Discord", Value: fmt.Sprintf("<@%s>", targetUser.ID), Inline: true},
+				{Name: "Username Roblox", Value: fmt.Sprintf("`@%s`", roblox), Inline: true},
+				{Name: "Livello Warn", Value: fmt.Sprintf("%d / 3", numero), Inline: true},
+				{Name: "Motivazione", Value: truncate(motivo, 1000), Inline: false},
+				{Name: "Moderatore", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+			},
+		}
+
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "⚠️ **Avvertimento registrato ed emesso con successo!**",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+
+		s.ChannelMessageSendComplex(esitiChannel("warn", i.ChannelID), &discordgo.MessageSend{
+			Embeds: []*discordgo.MessageEmbed{embed},
 		})
 		return
 	}
@@ -1145,3 +1314,4 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		sendApproval(s, esitiChannel("emetti-multa", i.ChannelID), embed, userID, "Approva Multa (Sì)", "Annulla Multa (No)")
 	}
 }
+ 
