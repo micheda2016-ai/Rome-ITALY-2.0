@@ -268,7 +268,7 @@ func main() {
 }
 
 func registerCommands(s *discordgo.Session) {
-	staffPerm := int64(discordgo.PermissionManageGuild)
+	staffPerm := int64(discordgo.PermissionManageServer)
 
 	setupSub := func(name, desc string) *discordgo.ApplicationCommandOption {
 		return &discordgo.ApplicationCommandOption{
