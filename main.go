@@ -312,6 +312,11 @@ func registerCommands(s *discordgo.Session) {
 		},
 	}
 
+	// Cancella i comandi GLOBALI vecchi (causa dei comandi doppi)
+	if _, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", []*discordgo.ApplicationCommand{}); err != nil {
+		log.Printf("Errore pulizia comandi globali: %v", err)
+	}
+
 	// Sovrascrive tutti i comandi del server: niente comandi vecchi rimasti in giro
 	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, guildID, commands)
 	if err != nil {
