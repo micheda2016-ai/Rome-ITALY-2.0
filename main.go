@@ -1027,13 +1027,13 @@ func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey strin
 		sendPanel(s, channelID, embed, &discordgo.Button{Label: "Immatricola", Style: discordgo.PrimaryButton, CustomID: "btn_immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚙"}})
 
 	case "registra-arresto":
-		embed := &embed := &discordgo.MessageEmbed{
+		embed := &discordgo.MessageEmbed{
 			Title: "🚨 REGISTRO ARRESTI FORZE DELL'ORDINE",
 			Description: "Pannello riservato agli operatori delle Forze dell'Ordine per la verbalizzazione ufficiale degli arresti.\n\n" +
 				"📋 Inserisci i dettagli dell'indiziato, i capi d'accusa, la prigione e l'eventuale cauzione.",
 			Color: 0xE74C3C,
 		}
-		sendPanel(s, channelID, embed, &discordgo.Button{Label: "Registra", Style: discordgo.DangerButton, CustomID: "btn_registra-arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}})
+		sendPanel(s, channelID, embed, &discordgo.Button{Label: "Registra", Style: discordgo.DangerButton, CustomID: "btn_registra_arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}})
 
 	case "emetti-multa":
 		embed := &discordgo.MessageEmbed{
