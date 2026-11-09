@@ -649,7 +649,7 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if sub == "conto" {
 			nuovoSaldo := int(data.Options[0].Options[1].IntValue())
 			acc := userBankAccounts[targetID]
-			acc.Balance = nuevoSaldo
+			acc.Balance = nuovoSaldo
 			userBankAccounts[targetID] = acc
 			respond(s, i, fmt.Sprintf("✅ Saldo conto di <@%s> modificato a € %d.", targetID, nuovoSaldo))
 			return
