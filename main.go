@@ -996,7 +996,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // ---------------------------------------------------------------------------
-// PUBBLICAZIONE PANNELLI CON EMOJI NEI BOTTONI
+// PUBBLICAZIONE PANNELLI
 // ---------------------------------------------------------------------------
 
 func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
