@@ -649,7 +649,7 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if sub == "conto" {
 			nuovoSaldo := int(data.Options[0].Options[1].IntValue())
 			acc := userBankAccounts[targetID]
-			acc.Balance = nuovoSaldo
+			acc.Balance = nuevoSaldo
 			userBankAccounts[targetID] = acc
 			respond(s, i, fmt.Sprintf("✅ Saldo conto di <@%s> modificato a € %d.", targetID, nuovoSaldo))
 			return
@@ -1036,10 +1036,9 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	if strings.HasPrefix(customID, "modal_conferma_conto_") {
 		banca := strings.TrimPrefix(customID, "modal_conferma_conto_")
-		nRP := modalVal(data, 0)
 		rUsr := modalVal(data, 1)
 
-		userBankAccounts[userID] = BankAccount{OwnerName: nRP, RobloxName: rUsr, BankName: banca, Balance: 7000}
+		userBankAccounts[userID] = BankAccount{OwnerName: modalVal(data, 0), RobloxName: rUsr, BankName: banca, Balance: 7000}
 		respond(s, i, "🎉 Conto aperto! Accreditati € 7.000 di bonus.")
 
 		embed := &discordgo.MessageEmbed{
@@ -1048,7 +1047,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Utente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
 				{Name: "Roblox", Value: rUsr, Inline: true},
-				{Name: "Nome RP", Value: nRP, Inline: true},
+				{Name: "Nome RP", Value: modalVal(data, 0), Inline: true},
 				{Name: "Banca", Value: strings.ToUpper(banca), Inline: true},
 			},
 		}
@@ -1058,7 +1057,6 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	switch customID {
 	case "modal_patente":
-		nRP := modalVal(data, 0)
 		rUsr := modalVal(data, 1)
 		tPat := modalVal(data, 2)
 
@@ -1070,7 +1068,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
 				{Name: "Roblox", Value: fmt.Sprintf("`@%s`", rUsr), Inline: true},
-				{Name: "Nome RP", Value: nRP, Inline: true},
+				{Name: "Nome RP", Value: modalVal(data, 0), Inline: true},
 				{Name: "Tipo Richiesto", Value: tPat, Inline: true},
 				{Name: "Punti Iniziali", Value: "30 Punti", Inline: true},
 			},
@@ -1078,7 +1076,6 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		sendApproval(s, esitiChannel("patente", i.ChannelID), embed, userID, "Accetta", "Rifiuta")
 
 	case "modal_porto_darmi":
-		nRP := modalVal(data, 0)
 		rUsr := modalVal(data, 1)
 		mot := modalVal(data, 2)
 
