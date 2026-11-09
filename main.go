@@ -785,7 +785,7 @@ func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) 
 }
 
 // ---------------------------------------------------------------------------
-// COMPONENTI
+// COMPONENTI (GESTIONE BOTTONI)
 // ---------------------------------------------------------------------------
 
 func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -918,12 +918,51 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			inputRow("r_user", "Username Roblox", discordgo.TextInputShort, "", "RobloxUser", true),
 		)
 
+	// --- MODULO PATENTE COMPLETAMENTE ISOLATO E CORRETTO ---
 	case "btn_richiedi_patente":
-		openModal(s, i, "modal_patente", "Richiesta Patente di Guida",
-			inputRow("p_nome", "Nome e Cognome RP", discordgo.TextInputShort, "", "Mario Rossi", true),
-			inputRow("p_roblox", "Username Roblox", discordgo.TextInputShort, "", "RobloxUser", true),
-			inputRow("p_tipo", "Tipo (A: Moto, B: Veicoli, C: Pulmini, D: Camion)", discordgo.TextInputShort, "", "Tipo B", true),
-		)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseModal,
+			Data: &discordgo.InteractionResponseData{
+				CustomID: "modal_patente",
+				Title:    "Richiesta Patente di Guida",
+				Components: []discordgo.MessageComponent{
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "p_nome",
+								Label:       "Nome e Cognome RP",
+								Style:       discordgo.TextInputShort,
+								Placeholder: "Mario Rossi",
+								Required:    true,
+							},
+						},
+					},
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "p_roblox",
+								Label:       "Username Roblox",
+								Style:       discordgo.TextInputShort,
+								Placeholder: "RobloxUser",
+								Required:    true,
+							},
+						},
+					},
+					discordgo.ActionsRow{
+						Components: []discordgo.MessageComponent{
+							discordgo.TextInput{
+								CustomID:    "p_tipo",
+								Label:       "Tipo (A: Moto, B: Veicoli, C: Pulmini)",
+								Style:       discordgo.TextInputShort,
+								Placeholder: "Tipo B",
+								Required:    true,
+							},
+						},
+					},
+				},
+			},
+		})
+		return
 
 	case "btn_richiedi_cittadinanza":
 		openModal(s, i, "modal_cittadinanza", "Cittadinanza",
