@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -774,7 +773,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
-			Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{newEmbed}, Components: []discordgo.MessageComponent{}},
+			Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{&newEmbed}, Components: []discordgo.MessageComponent{}},
 		})
 
 		if azione == "yes" && (strings.Contains(embedOrig.Title, "PATENTE") || strings.Contains(embedOrig.Description, "Patente")) {
