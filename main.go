@@ -27,7 +27,6 @@ type ServerConfig struct {
 	AuthRoleID     string
 }
 
-// Tasse generali (valgono per tutti, se non hanno tasse personalizzate)
 type GeneralTaxes struct {
 	Conto            int
 	Immatricolazione int
@@ -36,7 +35,6 @@ type GeneralTaxes struct {
 	CustomDeadline   string
 }
 
-// Tasse personalizzate per singolo utente
 type UserTaxOverride struct {
 	Conto            int
 	Immatricolazione int
@@ -58,6 +56,7 @@ type AnagrafeRecord struct {
 	NomeRP      string
 	CognomeRP   string
 	DataNascita string
+	Sesso       string
 }
 
 type PortoDarmiRecord struct {
@@ -74,17 +73,25 @@ type ImmatricolazioneRecord struct {
 	ModelloAuto string
 }
 
+type PatenteRecord struct {
+	UserID     string
+	RobloxUser string
+	NomeRP     string
+	Punti      int
+}
+
 // ---------------------------------------------------------------------------
 // DATI IN MEMORIA
 // ---------------------------------------------------------------------------
 
-var mu sync.Mutex // protegge tutte le mappe qui sotto
+var mu sync.Mutex
 
 var serverConfigs = make(map[string]*ServerConfig)
 var userBankAccounts = make(map[string]BankAccount)
 var dbAnagrafe = make(map[string]AnagrafeRecord)
 var dbPortoDarmi = make(map[string]PortoDarmiRecord)
 var dbImmatricolazioni = make(map[string]ImmatricolazioneRecord)
+var dbPatenti = make(map[string]PatenteRecord)
 var userTaxOverrides = make(map[string]UserTaxOverride)
 
 var defaultTaxes = GeneralTaxes{
@@ -95,7 +102,6 @@ var defaultTaxes = GeneralTaxes{
 	CustomDeadline:   "Ogni 7 giorni",
 }
 
-// Stipendio settimanale uguale per tutti
 var stipendioFisso = 13000
 
 // ---------------------------------------------------------------------------
@@ -117,7 +123,6 @@ func parseEuro(s string) int {
 	return n
 }
 
-// Restituisce le tasse dell'utente; true se sono personalizzate
 func getUserTaxes(userID string) (UserTaxOverride, bool) {
 	if o, ok := userTaxOverrides[userID]; ok {
 		return o, true
@@ -230,7 +235,7 @@ func main() {
 	}
 	go func() {
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintln(w, "Bot Rome Italy 2.0 Online!")
+			fmt.Fprintln(w, "Bot Rome Italy 2.0 (SQLite/Memory) Online!")
 		})
 		log.Printf("Server HTTP avviato sulla porta %s", port)
 		if err := http.ListenAndServe(":"+port, nil); err != nil {
@@ -238,9 +243,13 @@ func main() {
 		}
 	}()
 
-	token := strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
+	token := strings.TrimSpace(os.Getenv("TOKEN"))
 	if token == "" {
-		log.Println("⚠️ ERRORE: La variabile d'ambiente DISCORD_TOKEN non è impostata!")
+		token = strings.TrimSpace(os.Getenv("DISCORD_TOKEN"))
+	}
+
+	if token == "" {
+		log.Println("⚠️ ERRORE: La variabile d'ambiente TOKEN / DISCORD_TOKEN non è impostata!")
 	} else {
 		token = strings.TrimPrefix(token, "Bot ")
 
@@ -281,37 +290,92 @@ func registerCommands(s *discordgo.Session) {
 	commands := []*discordgo.ApplicationCommand{
 		{
 			Name:        "conto",
-			Description: "Visualizza il saldo del tuo conto corrente bancario",
+			Description: "Visualizza il saldo e le informazioni del tuo conto corrente",
+		},
+		{
+			Name:        "patente",
+			Description: "Visualizza i punti e lo stato della tua patente di guida",
+		},
+		{
+			Name:        "preleva",
+			Description: "Preleva denaro contante dal tuo conto bancario",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "importo",
+					Description: "Quantità di euro da prelevare",
+					Required:    true,
+					MinValue:    func() *float64 { v := float64(1); return &v }(),
+				},
+			},
+		},
+		{
+			Name:        "deposita",
+			Description: "Deposita denaro contante sul tuo conto bancario",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionInteger,
+					Name:        "importo",
+					Description: "Quantità di euro da depositare",
+					Required:    true,
+					MinValue:    func() *float64 { v := float64(1); return &v }(),
+				},
+			},
+		},
+		{
+			Name:                     "modifica",
+			Description:              "Comandi di modifica dati anagrafici e bancari per lo Staff",
+			DefaultMemberPermissions: &staffPerm,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "conto",
+					Description: "Modifica il saldo del conto bancario di un utente",
+					Options: []*discordgo.ApplicationCommandOption{
+						{Type: discordgo.ApplicationCommandOptionUser, Name: "utente", Description: "Utente Discord", Required: true},
+						{Type: discordgo.ApplicationCommandOptionInteger, Name: "nuovo_saldo", Description: "Nuovo saldo in euro", Required: true},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "cittadinanza",
+					Description: "Modifica i dati anagrafici di un cittadino",
+					Options: []*discordgo.ApplicationCommandOption{
+						{Type: discordgo.ApplicationCommandOptionUser, Name: "utente", Description: "Utente Discord", Required: true},
+						{Type: discordgo.ApplicationCommandOptionString, Name: "nome_cognome", Description: "Nuovo Nome e Cognome RP", Required: true},
+						{Type: discordgo.ApplicationCommandOptionString, Name: "roblox", Description: "Nuovo Username Roblox", Required: true},
+						{Type: discordgo.ApplicationCommandOptionString, Name: "data_nascita", Description: "Data di Nascita", Required: true},
+						{Type: discordgo.ApplicationCommandOptionString, Name: "sesso", Description: "Sesso (M/F)", Required: true},
+					},
+				},
+			},
+		},
+		{
+			Name:                     "decurta",
+			Description:              "Decurta punti dalla patente di un cittadino",
+			DefaultMemberPermissions: &staffPerm,
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Name:        "punti-patente",
+					Description: "Rimuovi punti patente a un utente",
+					Options: []*discordgo.ApplicationCommandOption{
+						{Type: discordgo.ApplicationCommandOptionUser, Name: "utente", Description: "Cittadino sanzionato", Required: true},
+						{Type: discordgo.ApplicationCommandOptionInteger, Name: "punti", Description: "Numero di punti da decurtare", Required: true, MinValue: func() *float64 { v := float64(1); return &v }()},
+						{Type: discordgo.ApplicationCommandOptionString, Name: "motivo", Description: "Motivazione dell'infrazione", Required: true},
+					},
+				},
+			},
 		},
 		{
 			Name:                     "ban",
 			Description:              "Emetti un provvedimento di ban per un utente",
 			DefaultMemberPermissions: &staffPerm,
 			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionUser,
-					Name:        "utente",
-					Description: "L'utente Discord da bannare",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "roblox",
-					Description: "Username Roblox dell'utente",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "motivo",
-					Description: "Motivazione del ban",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "durata",
-					Description: "Durata del ban (es. Permanente, 7 giorni)",
-					Required:    true,
-				},
+				{Type: discordgo.ApplicationCommandOptionUser, Name: "utente", Description: "L'utente Discord da bannare", Required: true},
+				{Type: discordgo.ApplicationCommandOptionString, Name: "roblox", Description: "Username Roblox dell'utente", Required: true},
+				{Type: discordgo.ApplicationCommandOptionString, Name: "motivo", Description: "Motivazione del ban", Required: true},
+				{Type: discordgo.ApplicationCommandOptionString, Name: "durata", Description: "Durata del ban", Required: true},
 			},
 		},
 		{
@@ -319,32 +383,10 @@ func registerCommands(s *discordgo.Session) {
 			Description:              "Emetti un avvertimento (warn) a un utente",
 			DefaultMemberPermissions: &staffPerm,
 			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionUser,
-					Name:        "utente",
-					Description: "L'utente Discord da ammonire",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "roblox",
-					Description: "Username Roblox dell'utente",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "motivo",
-					Description: "Motivazione del warn",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionInteger,
-					Name:        "numero",
-					Description: "Numero del warn (da 1 a 3)",
-					Required:    true,
-					MinValue:    func() *float64 { v := float64(1); return &v }(),
-					MaxValue:    3,
-				},
+				{Type: discordgo.ApplicationCommandOptionUser, Name: "utente", Description: "L'utente Discord da ammonire", Required: true},
+				{Type: discordgo.ApplicationCommandOptionString, Name: "roblox", Description: "Username Roblox dell'utente", Required: true},
+				{Type: discordgo.ApplicationCommandOptionString, Name: "motivo", Description: "Motivazione del warn", Required: true},
+				{Type: discordgo.ApplicationCommandOptionInteger, Name: "numero", Description: "Numero del warn (da 1 a 3)", Required: true, MinValue: func() *float64 { v := float64(1); return &v }(), MaxValue: 3},
 			},
 		},
 		{
@@ -355,6 +397,7 @@ func registerCommands(s *discordgo.Session) {
 				setupSub("anagrafe", "Visualizza tutte le carte d'identità registrate"),
 				setupSub("porto-darmi", "Visualizza tutte le richieste di porto d'armi"),
 				setupSub("immatricolazioni", "Visualizza tutti i veicoli immatricolati"),
+				setupSub("patenti", "Visualizza lo stato di tutte le patenti attive"),
 			},
 		},
 		{
@@ -366,6 +409,7 @@ func registerCommands(s *discordgo.Session) {
 				setupSub("apri-conto", "Invia il pannello bancario per l'apertura del conto"),
 				setupSub("busta-paga", fmt.Sprintf("Invia il pannello per la busta paga settimanale (€ %d)", stipendioFisso)),
 				setupSub("cittadinanza", "Invia il pannello anagrafe per la carta d'identità"),
+				setupSub("patente", "Invia il pannello di richiesta Patente di Guida"),
 				setupSub("porto-darmi", "Invia il pannello per la richiesta del porto d'armi"),
 				setupSub("immatricolazione", "Invia il pannello PRA per immatricolare i veicoli"),
 				setupSub("registra-arresto", "Invia il pannello delle Forze dell'Ordine per registrare arresti"),
@@ -376,12 +420,10 @@ func registerCommands(s *discordgo.Session) {
 		},
 	}
 
-	// Cancella i comandi GLOBALI vecchi
 	if _, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, "", []*discordgo.ApplicationCommand{}); err != nil {
 		log.Printf("Errore pulizia comandi globali: %v", err)
 	}
 
-	// Sovrascrive tutti i comandi del server
 	_, err := s.ApplicationCommandBulkOverwrite(s.State.User.ID, guildID, commands)
 	if err != nil {
 		log.Printf("Errore nella registrazione dei comandi: %v", err)
@@ -418,8 +460,9 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	userID := i.Member.User.ID
+
 	if data.Name == "conto" {
-		userID := i.Member.User.ID
 		account, exists := userBankAccounts[userID]
 		if !exists {
 			respond(s, i, "❌ Non possiedi ancora un conto corrente registrato! Usa il pannello di apertura conto per aprirne uno.")
@@ -451,7 +494,56 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// --- Comando /ban ---
+	if data.Name == "patente" {
+		pat, exists := dbPatenti[userID]
+		if !exists {
+			respond(s, i, "❌ Non risulti in possesso di una patente di guida registrata! Richiedila tramite l'apposito pannello in città.")
+			return
+		}
+		embed := &discordgo.MessageEmbed{
+			Title: "🪪 TESSERINO PATENTE DI GUIDA",
+			Color: 0xF1C40F,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Titolare", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Intestatario RP", Value: pat.NomeRP, Inline: true},
+				{Name: "Roblox", Value: fmt.Sprintf("`@%s`", pat.RobloxUser), Inline: true},
+				{Name: "Punti Rimanenti", Value: fmt.Sprintf("`%d / 30 punti`", pat.Punti), Inline: false},
+			},
+		}
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Embeds: []*discordgo.MessageEmbed{embed},
+				Flags:  discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
+
+	if data.Name == "preleva" || data.Name == "deposita" {
+		importo := int(data.Options[0].IntValue())
+		account, exists := userBankAccounts[userID]
+		if !exists {
+			respond(s, i, "❌ Non possiedi un conto corrente bancario registrato.")
+			return
+		}
+
+		if data.Name == "preleva" {
+			if account.Balance < importo {
+				respond(s, i, fmt.Sprintf("⚠️ Saldo insufficiente per il prelievo! Saldo attuale: `€ %d`", account.Balance))
+				return
+			}
+			account.Balance -= importo
+			userBankAccounts[userID] = account
+			respond(s, i, fmt.Sprintf("💵 **Prelievo Effettuato!** Hai prelevato **€ %d**. Nuovo saldo: `€ %d`", importo, account.Balance))
+		} else {
+			account.Balance += importo
+			userBankAccounts[userID] = account
+			respond(s, i, fmt.Sprintf("💳 **Deposito Effettuato!** Hai depositato **€ %d**. Nuovo saldo: `€ %d`", importo, account.Balance))
+		}
+		return
+	}
+
 	if data.Name == "ban" {
 		var targetUser *discordgo.User
 		var roblox, motivo, durata string
@@ -475,7 +567,6 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 
 		avatarURL := targetUser.AvatarURL("128")
-
 		embed := &discordgo.MessageEmbed{
 			Title:     "🔨 PROVVEDIMENTO DI BAN",
 			Color:     0xE74C3C,
@@ -485,25 +576,19 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				{Name: "Username Roblox", Value: fmt.Sprintf("`@%s`", roblox), Inline: true},
 				{Name: "Durata", Value: durata, Inline: true},
 				{Name: "Motivazione", Value: truncate(motivo, 1000), Inline: false},
-				{Name: "Moderatore", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+				{Name: "Moderatore", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
 			},
 		}
 
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "🔨 **Provvedimento di Ban registrato ed emesso con successo!**",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+		respond(s, i, "🔨 **Provvedimento di Ban registrato ed emesso con successo!**")
+		s.ChannelMessageSendComplex(esitiChannel("ban", i.ChannelID), &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}})
 
-		s.ChannelMessageSendComplex(esitiChannel("ban", i.ChannelID), &discordgo.MessageSend{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		})
+		if ch, err := s.UserChannelCreate(targetUser.ID); err == nil {
+			s.ChannelMessageSend(ch.ID, fmt.Sprintf("⚠️ Sei stato **BANNATO** dal server.\nMotivo: %s\nDurata: %s", motivo, durata))
+		}
 		return
 	}
 
-	// --- Comando /warn ---
 	if data.Name == "warn" {
 		var targetUser *discordgo.User
 		var roblox, motivo string
@@ -528,7 +613,6 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 
 		avatarURL := targetUser.AvatarURL("128")
-
 		embed := &discordgo.MessageEmbed{
 			Title:     fmt.Sprintf("⚠️ AVVERTIMENTO (WARN %d/3)", numero),
 			Color:     0xF1C40F,
@@ -538,21 +622,16 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				{Name: "Username Roblox", Value: fmt.Sprintf("`@%s`", roblox), Inline: true},
 				{Name: "Livello Warn", Value: fmt.Sprintf("%d / 3", numero), Inline: true},
 				{Name: "Motivazione", Value: truncate(motivo, 1000), Inline: false},
-				{Name: "Moderatore", Value: fmt.Sprintf("<@%s>", i.Member.User.ID), Inline: true},
+				{Name: "Moderatore", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
 			},
 		}
 
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "⚠️ **Avvertimento registrato ed emesso con successo!**",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
+		respond(s, i, "⚠️ **Avvertimento registrato ed emesso con successo!**")
+		s.ChannelMessageSendComplex(esitiChannel("warn", i.ChannelID), &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embed}})
 
-		s.ChannelMessageSendComplex(esitiChannel("warn", i.ChannelID), &discordgo.MessageSend{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		})
+		if ch, err := s.UserChannelCreate(targetUser.ID); err == nil {
+			s.ChannelMessageSend(ch.ID, fmt.Sprintf("⚠️ Hai ricevuto un **Warn (%d/3)**.\nMotivo: %s", numero, motivo))
+		}
 		return
 	}
 
@@ -567,29 +646,112 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		case "anagrafe":
 			sb.WriteString("📋 **LISTA CITTADINANZA / ANAGRAFE REGISTRATA:**\n\n")
 			if len(dbAnagrafe) == 0 {
-				sb.WriteString("*Nessuna carta d'identità registrata.*")
+				sb.WriteString("*Nessuna anagrafica registrata.*")
 			}
 			for _, rec := range dbAnagrafe {
-				sb.WriteString(fmt.Sprintf("• <@%s> | **RP:** %s %s | **Roblox:** `@%s` | **Nato:** %s\n", rec.UserID, rec.NomeRP, rec.CognomeRP, rec.RobloxUser, rec.DataNascita))
+				sb.WriteString(fmt.Sprintf("• <@%s> | **RP:** %s %s | **Roblox:** `@%s` | **Nato:** %s | **Sesso:** %s\n", rec.UserID, rec.NomeRP, rec.CognomeRP, rec.RobloxUser, rec.DataNascita, rec.Sesso))
 			}
 		case "porto-darmi":
 			sb.WriteString("🔫 **LISTA PORTO D'ARMI RICHIESTI:**\n\n")
 			if len(dbPortoDarmi) == 0 {
-				sb.WriteString("*Nessuna richiesta di porto d'armi.*")
+				sb.WriteString("*Nessuna richiesta.*")
 			}
 			for _, rec := range dbPortoDarmi {
-				sb.WriteString(fmt.Sprintf("• <@%s> | **RP:** %s | **Roblox:** `@%s` | **Motivazione:** %s\n", rec.UserID, rec.NomeRP, rec.RobloxUser, rec.Motivazione))
+				sb.WriteString(fmt.Sprintf("• <@%s> | **RP:** %s | **Roblox:** `@%s` | **Motivo:** %s\n", rec.UserID, rec.NomeRP, rec.RobloxUser, rec.Motivazione))
 			}
 		case "immatricolazioni":
 			sb.WriteString("🚗 **LISTA VEICOLI IMMATRICOLATI (PRA):**\n\n")
 			if len(dbImmatricolazioni) == 0 {
-				sb.WriteString("*Nessun veicolo immatricolato.*")
+				sb.WriteString("*Nessun veicolo.*")
 			}
 			for _, rec := range dbImmatricolazioni {
 				sb.WriteString(fmt.Sprintf("• <@%s> | **Modello:** %s | **Targa:** `%s` | **Roblox:** `@%s`\n", rec.UserID, rec.ModelloAuto, rec.Targa, rec.RobloxUser))
 			}
+		case "patenti":
+			sb.WriteString("🪪 **REGISTRO PATENTI DI GUIDA:**\n\n")
+			if len(dbPatenti) == 0 {
+				sb.WriteString("*Nessuna patente emessa.*")
+			}
+			for _, rec := range dbPatenti {
+				sb.WriteString(fmt.Sprintf("• <@%s> | **RP:** %s | **Roblox:** `@%s` | **Punti:** `%d/30`\n", rec.UserID, rec.NomeRP, rec.RobloxUser, rec.Punti))
+			}
 		}
 		respond(s, i, truncate(sb.String(), 1900))
+		return
+	}
+
+	if data.Name == "modifica" {
+		targetUser := data.Options[0].Options[0].UserValue(s)
+		targetID := targetUser.ID
+
+		if sub == "conto" {
+			nuovoSaldo := int(data.Options[0].Options[1].IntValue())
+			acc, exists := userBankAccounts[targetID]
+			if !exists {
+				userBankAccounts[targetID] = BankAccount{OwnerName: targetUser.Username, RobloxName: targetUser.Username, BankName: "Banca Centrale", Balance: nuovoSaldo}
+			} else {
+				acc.Balance = nuovoSaldo
+				userBankAccounts[targetID] = acc
+			}
+			respond(s, i, fmt.Sprintf("✅ Saldo conto di <@%s> modificato a **€ %d**.", targetID, nuovoSaldo))
+			return
+		}
+
+		if sub == "cittadinanza" {
+			nomeCognome := data.Options[0].Options[1].StringValue()
+			robloxUsr := data.Options[0].Options[2].StringValue()
+			dataNasc := data.Options[0].Options[3].StringValue()
+			sessoVal := data.Options[0].Options[4].StringValue()
+
+			parts := strings.SplitN(nomeCognome, " ", 2)
+			nome, cognome := nomeCognome, ""
+			if len(parts) == 2 {
+				nome, cognome = parts[0], parts[1]
+			}
+
+			dbAnagrafe[targetID] = AnagrafeRecord{
+				UserID: targetID, RobloxUser: robloxUsr, NomeRP: nome, CognomeRP: cognome, DataNascita: dataNasc, Sesso: sessoVal,
+			}
+			respond(s, i, fmt.Sprintf("✅ Anagrafica di <@%s> aggiornata con successo!", targetID))
+			return
+		}
+	}
+
+	if data.Name == "decurta" && sub == "punti-patente" {
+		targetUser := data.Options[0].Options[0].UserValue(s)
+		puntiDaTogliere := int(data.Options[0].Options[1].IntValue())
+		motivo := data.Options[0].Options[2].StringValue()
+		targetID := targetUser.ID
+
+		pat, exists := dbPatenti[targetID]
+		if !exists {
+			respond(s, i, "❌ Questo utente non possiede una patente registrata nel database!")
+			return
+		}
+
+		pat.Punti -= puntiDaTogliere
+		if pat.Punti < 0 {
+			pat.Punti = 0
+		}
+		dbPatenti[targetID] = pat
+
+		respond(s, i, fmt.Sprintf("✅ Decurtati **%d punti** patente a <@%s>. Punti residui: **%d / 30**", puntiDaTogliere, targetID, pat.Punti))
+
+		embedEsito := &discordgo.MessageEmbed{
+			Title: "🚨 NOTIFICA SANZIONE / DECURTAZIONE PATENTE",
+			Color: 0xE74C3C,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Agente / Operatore", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Punti Tolti", Value: fmt.Sprintf("-%d punti", puntiDaTogliere), Inline: true},
+				{Name: "Punti Residui", Value: fmt.Sprintf("%d / 30", pat.Punti), Inline: true},
+				{Name: "Motivazione Infrazione", Value: truncate(motivo, 1000), Inline: false},
+			},
+		}
+		s.ChannelMessageSendComplex(esitiChannel("patente", i.ChannelID), &discordgo.MessageSend{Embeds: []*discordgo.MessageEmbed{embedEsito}})
+
+		if ch, err := s.UserChannelCreate(targetID); err == nil {
+			s.ChannelMessageSendEmbed(ch.ID, embedEsito)
+		}
 		return
 	}
 
@@ -695,6 +857,7 @@ func sendServerSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) 
 		Placeholder: "Scegli il comando da configurare...",
 		Options: []discordgo.SelectMenuOption{
 			opt("Cittadinanza & Anagrafe", "cittadinanza", "🇮🇹"),
+			opt("Patente di Guida", "patente", "🪪"),
 			opt("Porto d'Armi", "porto-darmi", "🔫"),
 			opt("Apertura Conto Bancario", "apri-conto", "💳"),
 			opt("Riscossione Busta Paga", "busta-paga", "💵"),
@@ -730,7 +893,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// --- Invio pannello pubblico ---
 	if strings.HasPrefix(customID, "send_panel_to_channel_") {
 		serviceKey := strings.TrimPrefix(customID, "send_panel_to_channel_")
 		targetChannel := getOrCreateConfig(serviceKey).PanelChannelID
@@ -742,7 +904,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// --- Configurazione tasse ---
 	switch customID {
 	case "btn_config_tasse_generali":
 		openModal(s, i, "modal_config_tasse_base", "Configura Tasse Generali",
@@ -760,9 +921,9 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 
 	case "btn_config_tasse_user", "btn_reset_tasse_user":
-		prefix, text := "seluser_tasse", "👤 Scegli l'utente a cui impostare le tasse personalizzate (immatricolazione, conto, immobili):"
+		prefix, text := "seluser_tasse", "👤 Scegli l'utente a cui impostare le tasse personalizzate:"
 		if customID == "btn_reset_tasse_user" {
-			prefix, text = "seluserreset_tasse", "🗑️ Scegli l'utente a cui rimuovere la tassa personalizzata (tornerà alle tasse generali):"
+			prefix, text = "seluserreset_tasse", "🗑️ Scegli l'utente a cui rimuovere la tassa personalizzata:"
 		}
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -798,7 +959,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		target := values[0]
 		if _, ok := userTaxOverrides[target]; ok {
 			delete(userTaxOverrides, target)
-			respond(s, i, fmt.Sprintf("✅ Tassa personalizzata rimossa per <@%s>. Ora paga le tasse generali.", target))
+			respond(s, i, fmt.Sprintf("✅ Tassa personalizzata rimossa per <@%s>.", target))
 		} else {
 			respond(s, i, fmt.Sprintf("ℹ️ <@%s> non aveva tasse personalizzate.", target))
 		}
@@ -814,11 +975,33 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		azione := parts[1]
 		targetUserID := parts[2]
 
-		newEmbed := *i.Message.Embeds[0]
+		embedOriginal := i.Message.Embeds[0]
+		authRole := getOrCreateConfig("patente").AuthRoleID
+		if authRole != "" {
+			hasRole := false
+			for _, r := range i.Member.Roles {
+				if r == authRole {
+					hasRole = true
+					break
+				}
+			}
+			if !hasRole && !i.Member.User.Bot {
+				respond(s, i, "❌ Non possiedi il ruolo autorizzato per approvare o rifiutare questa richiesta!")
+				return
+			}
+		}
+
+		newEmbed := *embedOriginal
 		if azione == "yes" {
 			newEmbed.Color = 0x2ECC71
 			newEmbed.Title = "✅ APPROVATO DALLO STAFF"
 			newEmbed.Description += fmt.Sprintf("\n\n**Stato:** Approvato da <@%s>", i.Member.User.ID)
+
+			if strings.Contains(strings.ToLower(newEmbed.Title), "patente") || strings.Contains(strings.ToLower(newEmbed.Description), "patente") {
+				nomeRP := "Cittadino"
+				robloxUsr := "RobloxUser"
+				dbPatenti[targetUserID] = PatenteRecord{UserID: targetUserID, RobloxUser: robloxUsr, NomeRP: nomeRP, Punti: 30}
+			}
 		} else {
 			newEmbed.Color = 0xE74C3C
 			newEmbed.Title = "❌ RIFIUTATO DALLO STAFF"
@@ -835,15 +1018,14 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		if ch, err := s.UserChannelCreate(targetUserID); err == nil {
 			if azione == "yes" {
-				s.ChannelMessageSend(ch.ID, "🎉 Salve, la tua richiesta inviata nel server è stata **APPROVATA** dallo staff!")
+				s.ChannelMessageSend(ch.ID, "🎉 La tua richiesta è stata **APPROVATA** dalle autorità competenti! (Se riguarda la patente, parti con 30 punti iniziali).")
 			} else {
-				s.ChannelMessageSend(ch.ID, "❌ Salve, la tua richiesta inviata nel server è stata **RIFIUTATA** dallo staff.")
+				s.ChannelMessageSend(ch.ID, "❌ La tua richiesta è stata **RIFIUTATA** dallo staff.")
 			}
 		}
 		return
 	}
 
-	// --- Setup server: scelta comando ---
 	if customID == "setup_server_select" {
 		selected := "cittadinanza"
 		if len(values) > 0 {
@@ -854,7 +1036,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nScegli i canali (`#`) e il ruolo (`@`):", strings.ToUpper(selected)),
+				Content: fmt.Sprintf("🛠️ **Configurazione per: %s**\nScegli i canali (`#`) e il ruolo autorizzato (`@`):", strings.ToUpper(selected)),
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{
@@ -864,7 +1046,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 						discordgo.SelectMenu{CustomID: "selchanesiti_" + selected, Placeholder: "Canale dei risultati/esiti (#)...", MenuType: discordgo.ChannelSelectMenu, ChannelTypes: chanTypes},
 					}},
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-						discordgo.SelectMenu{CustomID: "selroleauth_" + selected, Placeholder: "Ruolo autorizzato (@)...", MenuType: discordgo.RoleSelectMenu},
+						discordgo.SelectMenu{CustomID: "selroleauth_" + selected, Placeholder: "Ruolo autorizzato ad accettare/rifiutare (@)...", MenuType: discordgo.RoleSelectMenu},
 					}},
 				},
 			},
@@ -872,7 +1054,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// --- Setup server: salvataggio canali/ruolo ---
 	if strings.HasPrefix(customID, "selchanpanel_") || strings.HasPrefix(customID, "selchanesiti_") || strings.HasPrefix(customID, "selroleauth_") {
 		if len(values) > 0 {
 			v := values[0]
@@ -889,7 +1070,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// --- Bottoni dei pannelli pubblici ---
 	switch customID {
 	case "btn_paga_tasse":
 		userID := i.Member.User.ID
@@ -904,7 +1084,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			rim := interval - time.Since(account.LastTaxPaid)
 			giorni := int(rim.Hours()) / 24
 			ore := int(rim.Hours()) % 24
-			respond(s, i, fmt.Sprintf("⏳ **Hai già saldato le tasse per questo periodo!**\nPotrai versarle di nuovo tra **%d giorni e %d ore**.\n📌 *Scadenza:* %s", giorni, ore, defaultTaxes.CustomDeadline))
+			respond(s, i, fmt.Sprintf("⏳ **Hai già saldato le tasse questa settimana!** Potrai versarle di nuovo tra **%d giorni e %d ore**.", giorni, ore))
 			return
 		}
 
@@ -934,9 +1114,6 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Fields: []*discordgo.MessageEmbedField{
 				{Name: "Cittadino Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
 				{Name: "Tipo Aliquota", Value: tipo, Inline: true},
-				{Name: "Tassa Conto", Value: fmt.Sprintf("€ %d", t.Conto), Inline: true},
-				{Name: "Tassa Immatricolazione", Value: fmt.Sprintf("€ %d", t.Immatricolazione), Inline: true},
-				{Name: "Tassa Immobili", Value: fmt.Sprintf("€ %d", t.Immobili), Inline: true},
 				{Name: "Totale Versato", Value: fmt.Sprintf("`€ %d`", totale), Inline: true},
 			},
 		}
@@ -944,7 +1121,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	case "btn_apri_conto":
 		if _, exists := userBankAccounts[i.Member.User.ID]; exists {
-			respond(s, i, "❌ Hai già un conto corrente aperto! Usa `/conto` per vedere il saldo.")
+			respond(s, i, "❌ Hai già un conto corrente aperto!")
 			return
 		}
 		selectBanche := discordgo.SelectMenu{
@@ -955,15 +1132,12 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				{Label: "Poste Italiane", Value: "poste", Emoji: &discordgo.ComponentEmoji{Name: "📮"}},
 				{Label: "Intesa Sanpaolo", Value: "intesa", Emoji: &discordgo.ComponentEmoji{Name: "🏦"}},
 				{Label: "UniCredit", Value: "unicredit", Emoji: &discordgo.ComponentEmoji{Name: "🔴"}},
-				{Label: "BPER Banca", Value: "bper", Emoji: &discordgo.ComponentEmoji{Name: "🟦"}},
-				{Label: "Banco BPM", Value: "bpm", Emoji: &discordgo.ComponentEmoji{Name: "🟢"}},
-				{Label: "Revolut", Value: "revolut", Emoji: &discordgo.ComponentEmoji{Name: "💳"}},
 			},
 		}
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "Scegli la banca con cui desideri aprire il conto corrente (riceverai subito **€ 7.000** di bonus):",
+				Content: "Scegli la banca per aprire il tuo conto corrente (bonus benvenuto **€ 7.000**):",
 				Flags:   discordgo.MessageFlagsEphemeral,
 				Components: []discordgo.MessageComponent{
 					discordgo.ActionsRow{Components: []discordgo.MessageComponent{selectBanche}},
@@ -977,23 +1151,29 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			selected = values[0]
 		}
 		openModal(s, i, "modal_conferma_conto_"+selected, "Apertura Conto Corrente",
-			inputRow("input_nome_cognome_rp", "Nome e Cognome RP", discordgo.TextInputShort, "", "Es. Mario Rossi", true),
-			inputRow("input_roblox_username", "Username Roblox", discordgo.TextInputShort, "", "Es. RobloxUser123", true),
+			inputRow("input_nome_cognome_rp", "Nome e Cognome RP", discordgo.TextInputShort, "", "Mario Rossi", true),
+			inputRow("input_roblox_username", "Username Roblox", discordgo.TextInputShort, "", "RobloxUser123", true),
 		)
 
 	case "btn_richiedi_cittadinanza":
 		openModal(s, i, "modal_cittadinanza", "Registrazione Carta d'Identità",
-			inputRow("input_nome_rp", "Nome RP", discordgo.TextInputShort, "", "Es. Mario", true),
-			inputRow("input_cognome_rp", "Cognome RP", discordgo.TextInputShort, "", "Es. Rossi", true),
-			inputRow("input_roblox_user", "Username Roblox", discordgo.TextInputShort, "", "Es. RobloxPlayer1", true),
-			inputRow("input_data_nascita", "Data di Nascita RP", discordgo.TextInputShort, "", "GG/MM/AAAA", true),
+			inputRow("input_nome_rp", "Nome e Cognome RP", discordgo.TextInputShort, "", "Mario Rossi", true),
+			inputRow("input_roblox_user", "Username Roblox", discordgo.TextInputShort, "", "RobloxPlayer1", true),
+			inputRow("input_data_nascita", "Data di Nascita", discordgo.TextInputShort, "", "01/01/2000", true),
+			inputRow("input_sesso", "Sesso (M/F)", discordgo.TextInputShort, "", "M", true),
+		)
+
+	case "btn_richiedi_patente":
+		openModal(s, i, "modal_patente", "Richiesta Patente di Guida",
+			inputRow("input_nome_patente", "Nome e Cognome RP", discordgo.TextInputShort, "", "Mario Rossi", true),
+			inputRow("input_roblox_patente", "Username Roblox", discordgo.TextInputShort, "", "RobloxUser", true),
 		)
 
 	case "btn_richiedi_porto_darmi":
 		openModal(s, i, "modal_porto_darmi", "Richiesta Licenza Porto d'Armi",
 			inputRow("input_nome_cognome_pda", "Nome e Cognome RP", discordgo.TextInputShort, "", "", true),
 			inputRow("input_roblox_pda", "Username Roblox", discordgo.TextInputShort, "", "", true),
-			inputRow("input_motivazione_pda", "Motivazione Richiesta", discordgo.TextInputParagraph, "", "", true),
+			inputRow("input_motivazione_pda", "Motivazione", discordgo.TextInputParagraph, "", "", true),
 		)
 
 	case "btn_immatricolazione":
@@ -1006,24 +1186,24 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	case "btn_registra_arresto":
 		openModal(s, i, "modal_registra_arresto", "Verbale d'Arresto",
 			inputRow("input_utente_arrestato", "Utente Roblox Arrestato", discordgo.TextInputShort, "", "", true),
-			inputRow("input_reati", "Reati Commessi", discordgo.TextInputParagraph, "", "Inseguimento...", true),
+			inputRow("input_reati", "Reati Commessi", discordgo.TextInputParagraph, "", "", true),
 			inputRow("input_prigione", "Anni o Mesi di Prigione", discordgo.TextInputShort, "", "", true),
-			inputRow("input_cauzione", "Cauzione In Euro", discordgo.TextInputShort, "", "5000", false),
+			inputRow("input_cauzione", "Cauzione in Euro", discordgo.TextInputShort, "", "5000", false),
 		)
 
 	case "btn_emetti_multa":
 		openModal(s, i, "modal_emetti_multa", "Sanzione Stradale / Verbale Multa",
 			inputRow("input_utente_multato", "Utente Roblox Multato", discordgo.TextInputShort, "", "", true),
 			inputRow("input_importo_multa", "Importo Multa in Euro (€)", discordgo.TextInputShort, "", "150", true),
-			inputRow("input_motivo_multa", "Motivazione / Infrazione", discordgo.TextInputParagraph, "", "Eccesso di velocità...", true),
-			inputRow("input_targa_multa", "Targa Veicolo (opzionale)", discordgo.TextInputShort, "", "", false),
+			inputRow("input_motivo_multa", "Motivazione Infrazione", discordgo.TextInputParagraph, "", "", true),
+			inputRow("input_targa_multa", "Targa Veicolo", discordgo.TextInputShort, "", "", false),
 		)
 
 	case "btn_riscuoti_stipendio":
 		userID := i.Member.User.ID
 		account, exists := userBankAccounts[userID]
 		if !exists {
-			respond(s, i, "❌ Devi prima aprire un conto corrente bancario per poter riscuotere la busta paga!")
+			respond(s, i, "❌ Devi prima aprire un conto corrente bancario per riscuotere la busta paga!")
 			return
 		}
 
@@ -1032,7 +1212,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			rim := week - time.Since(account.LastPayday)
 			giorni := int(rim.Hours()) / 24
 			ore := int(rim.Hours()) % 24
-			respond(s, i, fmt.Sprintf("⏳ **Hai già riscosso la busta paga questa settimana!** Potrai riscuoterla di nuovo tra **%d giorni e %d ore**.", giorni, ore))
+			respond(s, i, fmt.Sprintf("⏳ **Hai già riscosso la busta paga questa settimana!** Potrai riscuoterla tra **%d giorni e %d ore**.", giorni, ore))
 			return
 		}
 
@@ -1040,7 +1220,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		account.LastPayday = time.Now()
 		userBankAccounts[userID] = account
 
-		respond(s, i, fmt.Sprintf("✅ **Busta Paga Riscossa con Successo!** Ti sono stati accreditati **€ %d** sul tuo conto. Saldo totale attuale: `€ %d`", stipendioFisso, account.Balance))
+		respond(s, i, fmt.Sprintf("✅ **Busta Paga Riscossa!** Accreditati **€ %d**. Saldo attuale: `€ %d`", stipendioFisso, account.Balance))
 	}
 }
 
@@ -1053,63 +1233,70 @@ func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey strin
 	case "apri-conto":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
 			Title:       "🏛️ APERTURA CONTO CORRENTE - ROME ITALY 2.0",
-			Description: "Clicca sul bottone qui sotto per scegliere il tuo istituto bancario e ricevere **€ 7.000** di bonus benvenuto!",
+			Description: "Clicca sul bottone per scegliere la tua banca e ricevere **€ 7.000** di bonus benvenuto!",
 			Color:       0x2ECC71,
 		}, &discordgo.Button{Label: "Apri Conto Corrente", Style: discordgo.SuccessButton, CustomID: "btn_apri_conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}})
 
+	case "patente":
+		sendPanel(s, channelID, &discordgo.MessageEmbed{
+			Title:       "🪪 RICHIESTA PATENTE DI GUIDA",
+			Description: "Clicca sul bottone **Compila** per avviare la richiesta ufficiale della patente di guida in città (parti con **30 punti**).",
+			Color:       0xF1C40F,
+		}, &discordgo.Button{Label: "Compila", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_patente", Emoji: &discordgo.ComponentEmoji{Name: "📝"}})
+
 	case "porto-darmi":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title:       "🔫 RICHIESTA PORTO D'ARMI - ROME ITALY 2.0",
-			Description: "Clicca sul bottone per inviare la richiesta di licenza porto d'armi alle autorità competenti.",
+			Title:       "🔫 RICHIESTA PORTO D'ARMI",
+			Description: "Richiedi la licenza per il porto d'armi.",
 			Color:       0xE67E22,
 		}, &discordgo.Button{Label: "Richiedi Porto d'Armi", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_porto_darmi", Emoji: &discordgo.ComponentEmoji{Name: "📜"}})
 
 	case "busta-paga":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title:       "💼 RISCOSSIONE BUSTA PAGA - ROME ITALY 2.0",
-			Description: fmt.Sprintf("Clicca sul bottone qui sotto per riscuotere la tua busta paga settimanale di **€ %d** sul tuo conto corrente!", stipendioFisso),
+			Title:       "💼 RISCOSSIONE BUSTA PAGA",
+			Description: fmt.Sprintf("Riscuoti la tua busta paga settimanale di **€ %d**.", stipendioFisso),
 			Color:       0xF1C40F,
 		}, &discordgo.Button{Label: fmt.Sprintf("Riscuoti Busta Paga (€ %d)", stipendioFisso), Style: discordgo.PrimaryButton, CustomID: "btn_riscuoti_stipendio", Emoji: &discordgo.ComponentEmoji{Name: "💵"}})
 
 	case "cittadinanza":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title:       "🇮🇹 ANAGRAFE CENTRALE - ROME ITALY 2.0",
-			Description: "Richiedi la tua Carta d'Identità e la Cittadinanza ufficiali.",
+			Title:       "🇮🇹 ANAGRAFE CENTRALE - CITTADINANZA",
+			Description: "Richiedi la tua Carta d'Identità.",
 			Color:       0x3498DB,
 		}, &discordgo.Button{Label: "Richiedi Cittadinanza", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🆔"}})
 
 	case "immatricolazione":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title:       "🚗 UFFICIO PRA - IMMATRICOLAZIONE VEICOLI",
-			Description: "Clicca sul bottone per registrare e immatricolare ufficialmente il tuo veicolo nel server.",
+			Title:       "🚗 UFFICIO PRA - IMMATRICOLAZIONE",
+			Description: "Registra e immatricola il tuo veicolo.",
 			Color:       0x9B59B6,
 		}, &discordgo.Button{Label: "Immatricola Veicolo", Style: discordgo.PrimaryButton, CustomID: "btn_immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚘"}})
 
 	case "registra-arresto":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title:       "🚨 BANCA DATI POLIZIA DI STATO / CARABINIERI",
-			Description: "Compila il verbale dei fermi e degli arresti eseguiti durante il servizio.",
+			Title:       "🚨 REGISTRO ARRESTI FDO",
+			Description: "Compila il verbale dei fermi.",
 			Color:       0xE74C3C,
-		}, &discordgo.Button{Label: "Registra Arresto", Style: discordgo.DangerButton, CustomID: "btn_registra_arresto", Emoji: &discordgo.ComponentEmoji{Name: "📝"}})
+		}, &discordgo.Button{Label: "Registra Arresto", Style: discordgo.DangerButton, CustomID: "btn_registra_arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}})
 
 	case "emetti-multa":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title:       "📄 POLIZIA LOCALE - EMISSIONE VERBALE MULTA",
-			Description: "Clicca sul bottone per emettere una sanzione stradale nei confronti di un cittadino.",
+			Title:       "📄 EMISSIONE VERBALE MULTA",
+			Description: "Emetti una sanzione stradale.",
 			Color:       0xE74C3C,
 		}, &discordgo.Button{Label: "Emetti Multa", Style: discordgo.DangerButton, CustomID: "btn_emetti_multa", Emoji: &discordgo.ComponentEmoji{Name: "📄"}})
 
 	case "tasse":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title: "🏛️ AGENZIA DELLE ENTRATE - PAGAMENTO TASSE STATALI",
-			Description: fmt.Sprintf("Clicca sul bottone per versare le tue imposte: **conto**, **immatricolazione** e **immobili**.\nOgni cittadino paga l'importo a lui assegnato (controlla con `/conto`).\n\n📌 **Scadenza / Frequenza:** %s", defaultTaxes.CustomDeadline),
+			Title:       "🏛️ AGENZIA DELLE ENTRATE - PAGAMENTO TASSE",
+			Description: fmt.Sprintf("Paga le tue imposte settimanali.\n\n📌 **Scadenza:** %s", defaultTaxes.CustomDeadline),
 			Color:       0x95A5A6,
 		}, &discordgo.Button{Label: "Paga Tasse Statali", Style: discordgo.SuccessButton, CustomID: "btn_paga_tasse", Emoji: &discordgo.ComponentEmoji{Name: "💸"}})
 
 	case "staff-panel":
 		sendPanel(s, channelID, &discordgo.MessageEmbed{
-			Title:       "🛡️ PANNELLO STAFF - ROME ITALY 2.0",
-			Description: "Comandi riservati allo Staff:\n• `/visualizza anagrafe`\n• `/visualizza porto-darmi`\n• `/visualizza immatricolazioni`\n• `/setup tasse` per gestire le tasse",
+			Title:       "🛡️ PANNELLO STAFF",
+			Description: "Comandi rapidi staff:\n• `/modifica conto`\n• `/modifica cittadinanza`\n• `/decurta punti-patente`\n• `/visualizza patenti`",
 			Color:       0x2C3E50,
 		}, nil)
 	}
@@ -1128,17 +1315,14 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	userID := i.Member.User.ID
 
-	// --- Tasse generali ---
 	if customID == "modal_config_tasse_base" {
 		defaultTaxes.Conto = parseEuro(modalVal(data, 0))
 		defaultTaxes.Immatricolazione = parseEuro(modalVal(data, 1))
 		defaultTaxes.Immobili = parseEuro(modalVal(data, 2))
-		respond(s, i, fmt.Sprintf("✅ **Tasse Generali Aggiornate!**\n• Conto: € %d\n• Immatricolazione: € %d\n• Immobili: € %d",
-			defaultTaxes.Conto, defaultTaxes.Immatricolazione, defaultTaxes.Immobili))
+		respond(s, i, "✅ Tasse Generali Aggiornate!")
 		return
 	}
 
-	// --- Tempo tasse ---
 	if customID == "modal_config_tasse_time" {
 		days := parseEuro(modalVal(data, 0))
 		if days < 1 {
@@ -1146,11 +1330,10 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 		defaultTaxes.IntervalDays = days
 		defaultTaxes.CustomDeadline = modalVal(data, 1)
-		respond(s, i, fmt.Sprintf("✅ **Tempo Tasse Aggiornato!**\n• Frequenza: ogni **%d giorni**\n• Note scadenza: *%s*", defaultTaxes.IntervalDays, defaultTaxes.CustomDeadline))
+		respond(s, i, "✅ Frequenza tasse aggiornata!")
 		return
 	}
 
-	// --- Tasse personalizzate per utente ---
 	if strings.HasPrefix(customID, "modal_tasse_user_") {
 		target := strings.TrimPrefix(customID, "modal_tasse_user_")
 		t := UserTaxOverride{
@@ -1159,12 +1342,10 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Immobili:         parseEuro(modalVal(data, 2)),
 		}
 		userTaxOverrides[target] = t
-		respond(s, i, fmt.Sprintf("✅ **Tasse personalizzate per <@%s>!**\n• Conto: € %d\n• Immatricolazione: € %d\n• Immobili: € %d\n**Totale:** € %d",
-			target, t.Conto, t.Immatricolazione, t.Immobili, t.Conto+t.Immatricolazione+t.Immobili))
+		respond(s, i, fmt.Sprintf("✅ Tasse personalizzate salvate per <@%s>.", target))
 		return
 	}
 
-	// --- Apertura conto ---
 	if strings.HasPrefix(customID, "modal_conferma_conto_") {
 		banca := strings.TrimPrefix(customID, "modal_conferma_conto_")
 		nomeRP := modalVal(data, 0)
@@ -1175,143 +1356,146 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		userBankAccounts[userID] = BankAccount{
-			OwnerName:  nomeRP,
-			RobloxName: robloxUser,
-			BankName:   banca,
-			Balance:    7000,
-		}
-
-		respond(s, i, "🎉 **Conto Corrente Aperto con Successo!** Ti sono stati accreditati **€ 7.000** di bonus benvenuto. Verifica il saldo con `/conto`.")
+		userBankAccounts[userID] = BankAccount{OwnerName: nomeRP, RobloxName: robloxUser, BankName: banca, Balance: 7000}
+		respond(s, i, "🎉 Conto aperto con successo! Accreditati **€ 7.000** di bonus.")
 
 		embed := &discordgo.MessageEmbed{
 			Title: "💳 NUOVA APERTURA CONTO BANCARIO",
 			Color: 0x2ECC71,
-			Description: fmt.Sprintf("**Richiedente Discord:** <@%s>\n**Utente Roblox:** `@%s`\n**Nome & Cognome RP:** %s\n**Banca:** %s\n\n*Saldo accreditato:* € 7.000",
-				userID, robloxUser, nomeRP, strings.ToUpper(banca)),
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
+				{Name: "Nome RP", Value: nomeRP, Inline: true},
+				{Name: "Banca", Value: strings.ToUpper(banca), Inline: true},
+			},
 		}
-		sendApproval(s, esitiChannel("apri-conto", i.ChannelID), embed, userID, "Accetta (Sì)", "Rifiuta (No)")
+		sendApproval(s, esitiChannel("apri-conto", i.ChannelID), embed, userID, "Accetta", "Rifiuta")
 		return
 	}
 
 	switch customID {
+	case "modal_patente":
+		nomeRP := modalVal(data, 0)
+		robloxUser := modalVal(data, 1)
+
+		respond(s, i, "🪪 Richiesta patente inviata allo staff in attesa di verifica (Parti con 30 punti)!")
+
+		embed := &discordgo.MessageEmbed{
+			Title: "🪪 RICHIESTA PATENTE DI GUIDA",
+			Color: 0xF1C40F,
+			Fields: []*discordgo.MessageEmbedField{
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
+				{Name: "Nome RP", Value: nomeRP, Inline: true},
+				{Name: "Punti Iniziali", Value: "30 Punti", Inline: true},
+			},
+		}
+		sendApproval(s, esitiChannel("patente", i.ChannelID), embed, userID, "Accetta", "Rifiuta")
+
 	case "modal_porto_darmi":
 		nomeRP := modalVal(data, 0)
 		robloxUser := modalVal(data, 1)
-		motivazione := modalVal(data, 2)
+		motivo := modalVal(data, 2)
 
-		dbPortoDarmi[userID] = PortoDarmiRecord{UserID: userID, RobloxUser: robloxUser, NomeRP: nomeRP, Motivazione: motivazione}
-
-		respond(s, i, "📜 **Richiesta Porto d'Armi Inviata!** Sarà valutata dalle autorità.")
-
+		respond(s, i, "📜 Richiesta porto d'armi inviata.")
 		embed := &discordgo.MessageEmbed{
-			Title: "🔫 RICHIESTA LICENZA PORTO D'ARMI",
+			Title: "🔫 RICHIESTA PORTO D'ARMI",
 			Color: 0xE67E22,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Richiedente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
-				{Name: "Utente Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
-				{Name: "Nome & Cognome RP", Value: nomeRP, Inline: true},
-				{Name: "Motivazione", Value: truncate(motivazione, 1000), Inline: false},
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
+				{Name: "Nome RP", Value: nomeRP, Inline: true},
+				{Name: "Motivazione", Value: truncate(motivo, 1000), Inline: false},
 			},
 		}
-		sendApproval(s, esitiChannel("porto-darmi", i.ChannelID), embed, userID, "Accetta (Sì)", "Rifiuta (No)")
+		sendApproval(s, esitiChannel("porto-darmi", i.ChannelID), embed, userID, "Accetta", "Rifiuta")
 
 	case "modal_cittadinanza":
-		nomeRP := modalVal(data, 0)
-		cognomeRP := modalVal(data, 1)
-		robloxUser := modalVal(data, 2)
-		dataNascita := modalVal(data, 3)
+		nomeCognome := modalVal(data, 0)
+		robloxUser := modalVal(data, 1)
+		dataNascita := modalVal(data, 2)
+		sesso := modalVal(data, 3)
 
-		dbAnagrafe[userID] = AnagrafeRecord{UserID: userID, RobloxUser: robloxUser, NomeRP: nomeRP, CognomeRP: cognomeRP, DataNascita: dataNascita}
+		parts := strings.SplitN(nomeCognome, " ", 2)
+		nome, cognome := nomeCognome, ""
+		if len(parts) == 2 {
+			nome, cognome = parts[0], parts[1]
+		}
 
-		respond(s, i, "🇮🇹 **Richiesta Cittadinanza Registrata!** Inviata nel canale esiti.")
+		dbAnagrafe[userID] = AnagrafeRecord{UserID: userID, RobloxUser: robloxUser, NomeRP: nome, CognomeRP: cognome, DataNascita: dataNascita, Sesso: sesso}
 
+		respond(s, i, "🇮🇹 Richiesta cittadinanza inviata.")
 		embed := &discordgo.MessageEmbed{
-			Title: "🇮🇹 NUOVA RICHIESTA CITTADINANZA / CARTA D'IDENTITÀ",
+			Title: "🇮🇹 NUOVA RICHIESTA CITTADINANZA",
 			Color: 0x3498DB,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Richiedente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
-				{Name: "Utente Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
-				{Name: "Nome RP", Value: nomeRP, Inline: true},
-				{Name: "Cognome RP", Value: cognomeRP, Inline: true},
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
+				{Name: "Nome e Cognome", Value: nomeCognome, Inline: true},
 				{Name: "Data di Nascita", Value: dataNascita, Inline: true},
+				{Name: "Sesso", Value: sesso, Inline: true},
 			},
 		}
-		sendApproval(s, esitiChannel("cittadinanza", i.ChannelID), embed, userID, "Accetta (Sì)", "Rifiuta (No)")
+		sendApproval(s, esitiChannel("cittadinanza", i.ChannelID), embed, userID, "Accetta", "Rifiuta")
 
 	case "modal_immatricolazione":
 		robloxUser := modalVal(data, 0)
 		modelloAuto := modalVal(data, 1)
 		targa := strings.ToUpper(strings.TrimSpace(modalVal(data, 2)))
 
-		if existing, taken := dbImmatricolazioni[targa]; taken && existing.UserID != userID {
-			respond(s, i, fmt.Sprintf("❌ La targa `%s` è già registrata a un altro cittadino. Scegline un'altra.", targa))
-			return
-		}
-
 		dbImmatricolazioni[targa] = ImmatricolazioneRecord{UserID: userID, RobloxUser: robloxUser, Targa: targa, ModelloAuto: modelloAuto}
 
-		respond(s, i, "🚗 **Immatricolazione Inviata!** Inserita nel registro PRA.")
-
+		respond(s, i, "🚗 Immatricolazione veicolo inviata.")
 		embed := &discordgo.MessageEmbed{
-			Title: "🚗 NUOVA RICHIESTA IMMATRICOLAZIONE VEICOLO",
+			Title: "🚗 IMMATRICOLAZIONE VEICOLO",
 			Color: 0x9B59B6,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Richiedente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
-				{Name: "Utente Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
-				{Name: "Modello Veicolo", Value: modelloAuto, Inline: true},
-				{Name: "Targa Richiesta", Value: fmt.Sprintf("`%s`", targa), Inline: true},
+				{Name: "Richiedente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Roblox", Value: fmt.Sprintf("`@%s`", robloxUser), Inline: true},
+				{Name: "Modello", Value: modelloAuto, Inline: true},
+				{Name: "Targa", Value: fmt.Sprintf("`%s`", targa), Inline: true},
 			},
 		}
-		sendApproval(s, esitiChannel("immatricolazione", i.ChannelID), embed, userID, "Accetta (Sì)", "Rifiuta (No)")
+		sendApproval(s, esitiChannel("immatricolazione", i.ChannelID), embed, userID, "Accetta", "Rifiuta")
 
 	case "modal_registra_arresto":
 		utenteArrestato := modalVal(data, 0)
 		reati := modalVal(data, 1)
 		prigione := modalVal(data, 2)
 		cauzione := modalVal(data, 3)
-		if cauzione == "" {
-			cauzione = "Nessuna"
-		}
 
 		embed := &discordgo.MessageEmbed{
-			Title: "🚨 VERBALE D'ARRESTO UFFICIALE",
+			Title: "🚨 VERBALE D'ARRESTO",
 			Color: 0xE74C3C,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Agente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
-				{Name: "Arrestato Roblox", Value: fmt.Sprintf("`@%s`", utenteArrestato), Inline: true},
+				{Name: "Agente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Arrestato (Roblox)", Value: fmt.Sprintf("`@%s`", utenteArrestato), Inline: true},
 				{Name: "Pena", Value: prigione, Inline: true},
 				{Name: "Cauzione", Value: cauzione, Inline: true},
 				{Name: "Reati", Value: truncate(reati, 1000), Inline: false},
 			},
 		}
-
-		respond(s, i, "🚨 **Verbale Registrato!** Inviato nel canale del registro ufficiale.")
-		sendApproval(s, esitiChannel("registra-arresto", i.ChannelID), embed, userID, "Approva Verbale (Sì)", "Annulla Verbale (No)")
+		respond(s, i, "🚨 Verbale registrato.")
+		sendApproval(s, esitiChannel("registra-arresto", i.ChannelID), embed, userID, "Approva", "Annulla")
 
 	case "modal_emetti_multa":
 		utenteMultato := modalVal(data, 0)
 		importo := modalVal(data, 1)
 		motivo := modalVal(data, 2)
 		targa := modalVal(data, 3)
-		if targa == "" {
-			targa = "N/D"
-		}
 
 		embed := &discordgo.MessageEmbed{
-			Title: "📄 SANZIONE STRADALE / VERBALE MULTA",
+			Title: "📄 VERBALE SANZIONE / MULTA",
 			Color: 0xE74C3C,
 			Fields: []*discordgo.MessageEmbedField{
-				{Name: "Agente Discord", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
-				{Name: "Cittadino Multato (Roblox)", Value: fmt.Sprintf("`@%s`", utenteMultato), Inline: true},
-				{Name: "Importo Multa", Value: fmt.Sprintf("€ %s", importo), Inline: true},
-				{Name: "Targa Veicolo", Value: fmt.Sprintf("`%s`", targa), Inline: true},
-				{Name: "Infrazione / Motivazione", Value: truncate(motivo, 1000), Inline: false},
+				{Name: "Agente", Value: fmt.Sprintf("<@%s>", userID), Inline: true},
+				{Name: "Multato (Roblox)", Value: fmt.Sprintf("`@%s`", utenteMultato), Inline: true},
+				{Name: "Importo", Value: fmt.Sprintf("€ %s", importo), Inline: true},
+				{Name: "Targa", Value: fmt.Sprintf("`%s`", targa), Inline: true},
+				{Name: "Motivo", Value: truncate(motivo, 1000), Inline: false},
 			},
 		}
-
-		respond(s, i, "📄 **Verbale di Multa Emesso e Registrato con Successo!**")
-		sendApproval(s, esitiChannel("emetti-multa", i.ChannelID), embed, userID, "Approva Multa (Sì)", "Annulla Multa (No)")
+		respond(s, i, "📄 Verbale multa emesso.")
+		sendApproval(s, esitiChannel("emetti-multa", i.ChannelID), embed, userID, "Approva", "Annulla")
 	}
 }
- 
