@@ -740,7 +740,7 @@ func sendTasseSetupPanel(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		Color: 0x95A5A6,
 	}
 	row := discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-		discordgo.Button{Label: "Invia Pannello", Style: discordgo.SuccessButton, CustomID: "send_panel_to_channel_tasse"},
+		discordgo.Button{Label: "Paga Tasse", Style: discordgo.SuccessButton, CustomID: "send_panel_to_channel_tasse", Emoji: &discordgo.ComponentEmoji{Name: "🏛️"}},
 	}}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -996,29 +996,29 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // ---------------------------------------------------------------------------
-// PUBBLICAZIONE PANNELLI
+// PUBBLICAZIONE PANNELLI CON EMOJI NEI BOTTONI
 // ---------------------------------------------------------------------------
 
 func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
 	switch serviceKey {
 	case "apri-conto":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "💳 APERTURA CONTO", Description: "Ricevi € 7.000 di bonus.", Color: 0x2ECC71}, &discordgo.Button{Label: "Apri Conto", Style: discordgo.SuccessButton, CustomID: "btn_apri_conto"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "💳 APERTURA CONTO", Description: "Ricevi € 7.000 di bonus.", Color: 0x2ECC71}, &discordgo.Button{Label: "Apri Conto", Style: discordgo.SuccessButton, CustomID: "btn_apri_conto", Emoji: &discordgo.ComponentEmoji{Name: "💳"}})
 	case "patente":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🪪 RICHIESTA PATENTE DI GUIDA", Description: "Clicca **Compila** per richiedere la patente.\n• **Tipo A:** Moto\n• **Tipo B:** Veicoli\n• **Tipo C:** Pulmini\n• **Tipo D:** Camion\nParti con **30 punti**.", Color: 0xF1C40F}, &discordgo.Button{Label: "Compila", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_patente"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🪪 RICHIESTA PATENTE DI GUIDA", Description: "Clicca **Compila** per richiedere la patente.\n• **Tipo A:** Moto\n• **Tipo B:** Veicoli\n• **Tipo C:** Pulmini\n• **Tipo D:** Camion\nParti con **30 punti**.", Color: 0xF1C40F}, &discordgo.Button{Label: "Compila", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_patente", Emoji: &discordgo.ComponentEmoji{Name: "🚗"}})
 	case "porto-darmi":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🔫 PORTO D'ARMI", Description: "Richiedi porto d'armi.", Color: 0xE67E22}, &discordgo.Button{Label: "Richiedi", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_porto_darmi"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🔫 PORTO D'ARMI", Description: "Richiedi porto d'armi.", Color: 0xE67E22}, &discordgo.Button{Label: "Richiedi", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_porto_darmi", Emoji: &discordgo.ComponentEmoji{Name: "🔫"}})
 	case "busta-paga":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "💵 BUSTA PAGA", Description: "Riscuoti stipendio.", Color: 0xF1C40F}, &discordgo.Button{Label: "Riscuoti", Style: discordgo.PrimaryButton, CustomID: "btn_riscuoti_stipendio"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "💵 BUSTA PAGA", Description: "Riscuoti stipendio.", Color: 0xF1C40F}, &discordgo.Button{Label: "Riscuoti", Style: discordgo.PrimaryButton, CustomID: "btn_riscuoti_stipendio", Emoji: &discordgo.ComponentEmoji{Name: "💵"}})
 	case "cittadinanza":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🇮🇹 CITTADINANZA", Description: "Richiedi documenti.", Color: 0x3498DB}, &discordgo.Button{Label: "Richiedi", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_cittadinanza"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🇮🇹 CITTADINANZA", Description: "Richiedi documenti.", Color: 0x3498DB}, &discordgo.Button{Label: "Richiedi", Style: discordgo.PrimaryButton, CustomID: "btn_richiedi_cittadinanza", Emoji: &discordgo.ComponentEmoji{Name: "🇮🇹"}})
 	case "immatricolazione":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🚗 IMMATRICOLAZIONE", Description: "Registra veicolo.", Color: 0x9B59B6}, &discordgo.Button{Label: "Immatricola", Style: discordgo.PrimaryButton, CustomID: "btn_immatricolazione"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🚗 IMMATRICOLAZIONE", Description: "Registra veicolo.", Color: 0x9B59B6}, &discordgo.Button{Label: "Immatricola", Style: discordgo.PrimaryButton, CustomID: "btn_immatricolazione", Emoji: &discordgo.ComponentEmoji{Name: "🚙"}})
 	case "registra-arresto":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🚨 ARRESTI FDO", Description: "Registra arresto.", Color: 0xE74C3C}, &discordgo.Button{Label: "Registra", Style: discordgo.DangerButton, CustomID: "btn_registra_arresto"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🚨 ARRESTI FDO", Description: "Registra arresto.", Color: 0xE74C3C}, &discordgo.Button{Label: "Registra", Style: discordgo.DangerButton, CustomID: "btn_registra_arresto", Emoji: &discordgo.ComponentEmoji{Name: "🚨"}})
 	case "emetti-multa":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "📄 MULTA", Description: "Emetti sanzione.", Color: 0xE74C3C}, &discordgo.Button{Label: "Emetti", Style: discordgo.DangerButton, CustomID: "btn_emetti_multa"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "📄 MULTA", Description: "Emetti sanzione.", Color: 0xE74C3C}, &discordgo.Button{Label: "Emetti", Style: discordgo.DangerButton, CustomID: "btn_emetti_multa", Emoji: &discordgo.ComponentEmoji{Name: "📄"}})
 	case "tasse":
-		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🏛️ TASSE", Description: "Paga le imposte.", Color: 0x95A5A6}, &discordgo.Button{Label: "Paga Tasse", Style: discordgo.SuccessButton, CustomID: "btn_paga_tasse"})
+		sendPanel(s, channelID, &discordgo.MessageEmbed{Title: "🏛️ TASSE", Description: "Paga le imposte.", Color: 0x95A5A6}, &discordgo.Button{Label: "Paga Tasse", Style: discordgo.SuccessButton, CustomID: "btn_paga_tasse", Emoji: &discordgo.ComponentEmoji{Name: "🏛️"}})
 	}
 }
 
