@@ -183,6 +183,52 @@ func sendPanel(s *discordgo.Session, channelID string, embed discordgo.MessageEm
 }
 
 // ---------------------------------------------------------------------------
+// GESTIONE AUTOMATICA BORSA VALORI (INVESTIMENTI DAL SITO)
+// ---------------------------------------------------------------------------
+
+func processStockInvestment(discordUser, robloxUser string, capitale, percentuale float64, titolo string) string {
+	mu.Lock()
+	defer mu.Unlock()
+
+	var targetID string
+	var account BankAccount
+	var found bool
+
+	// Cerca il conto per ID Discord o per nome Roblox
+	for id, acc := range userBankAccounts {
+		if id == discordUser || strings.EqualFold(acc.RobloxName, robloxUser) {
+			targetID = id
+			account = acc
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		// Se non trova il conto registrato in memoria, lo crea al volo con un saldo di default (o avvisa)
+		// Per sicurezza, se l'utente non ha registrato il conto via bot, creiamo un conto fittizio o restituiamo errore
+		return fmt.Sprintf("⚠️ Richiesta Borsa ricevuta per `@%s` (Discord: `%s`), ma l'utente non ha ancora aperto un conto bancario tramite il comando `/conto` o il pannello Discord.", robloxUser, discordUser)
+	}
+
+	if float64(account.Balance) < capitale {
+		return fmt.Sprintf("⚠️ **Investimento Respinto:** Saldo insufficiente per <@%s> (`@%s`). Saldo attuale: `€ %d`, richiesto: `€ %.0f`.", targetID, robloxUser, account.Balance, capitale)
+	}
+
+	// Scala il capitale dal conto
+	account.Balance -= int(capitale)
+	userBankAccounts[targetID] = account
+
+	guadagnoSettimanale := capitale * (percentuale / 100.0)
+
+	return fmt.Sprintf("📈 **INVESTIMENTO IN BORSA ELABORATO DAL BOT!**\n"+
+		"• **Cittadino:** <@%s> (`@%s`)\n"+
+		"• **Titolo:** %s\n"+
+		"• **Capitale Scalato:** `- € %.0f` (Nuovo saldo conto: `€ %d`)\n"+
+		"• **Rendimento Settimanale:** `+ € %.2f` (Tasso: `%.1f%%`)",
+		targetID, robloxUser, titolo, capitale, account.Balance, guadagnoSettimanale, percentuale)
+}
+
+// ---------------------------------------------------------------------------
 // MAIN
 // ---------------------------------------------------------------------------
 
@@ -216,6 +262,35 @@ func main() {
 			log.Printf("Errore creazione sessione Discord: %v", err)
 		} else {
 			dg.AddHandler(interactionHandler)
+			
+			// Handler opzionale per leggere eventuali messaggi di webhook o bot se necessario
+			dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+				if m.Author.ID == s.State.User.ID {
+					return
+				}
+				// Se il messaggio contiene la stringa BOT_DATA inviata dal sito, il bot può elaborarla in automatico
+				if strings.Contains(m.Content, "INVEST|") {
+					// Esempio di parsing automatico se il webhook formatta il testo
+					// Formato atteso: INVEST|DiscordUser|RobloxUser|Capitale|Percentuale|Titolo
+					lines := strings.Split(m.Content, "\n")
+					for _, line := range lines {
+						if strings.HasPrefix(line, "INVEST|") {
+							parts := strings.Split(line, "|")
+							if len(parts) >= 6 {
+								dUsr := parts[1]
+								rUsr := parts[2]
+								var cap, perc float64
+								fmt.Sscanf(parts[3], "%f", &cap)
+								fmt.Sscanf(parts[4], "%f", &perc)
+								titolo := parts[5]
+
+								resMsg := processStockInvestment(dUsr, rUsr, cap, perc, titolo)
+								s.ChannelMessageSend(m.ChannelID, resMsg)
+							}
+						}
+					}
+				}
+			})
 
 			if err = dg.Open(); err != nil {
 				log.Printf("Errore apertura connessione Discord: %v", err)
@@ -947,7 +1022,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // ---------------------------------------------------------------------------
-// PUBBLICAZIONE PANNELLI (LUNGHI, DESCRITTIVI E CURATI)
+// PUBBLICAZIONE PANNELLI
 // ---------------------------------------------------------------------------
 
 func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
