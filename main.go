@@ -194,7 +194,6 @@ func processStockInvestment(discordUser, robloxUser string, capitale, percentual
 	var account BankAccount
 	var found bool
 
-	// Cerca il conto per ID Discord o per nome Roblox
 	for id, acc := range userBankAccounts {
 		if id == discordUser || strings.EqualFold(acc.RobloxName, robloxUser) {
 			targetID = id
@@ -205,8 +204,6 @@ func processStockInvestment(discordUser, robloxUser string, capitale, percentual
 	}
 
 	if !found {
-		// Se non trova il conto registrato in memoria, lo crea al volo con un saldo di default (o avvisa)
-		// Per sicurezza, se l'utente non ha registrato il conto via bot, creiamo un conto fittizio o restituiamo errore
 		return fmt.Sprintf("⚠️ Richiesta Borsa ricevuta per `@%s` (Discord: `%s`), ma l'utente non ha ancora aperto un conto bancario tramite il comando `/conto` o il pannello Discord.", robloxUser, discordUser)
 	}
 
@@ -214,7 +211,6 @@ func processStockInvestment(discordUser, robloxUser string, capitale, percentual
 		return fmt.Sprintf("⚠️ **Investimento Respinto:** Saldo insufficiente per <@%s> (`@%s`). Saldo attuale: `€ %d`, richiesto: `€ %.0f`.", targetID, robloxUser, account.Balance, capitale)
 	}
 
-	// Scala il capitale dal conto
 	account.Balance -= int(capitale)
 	userBankAccounts[targetID] = account
 
@@ -263,15 +259,11 @@ func main() {
 		} else {
 			dg.AddHandler(interactionHandler)
 			
-			// Handler opzionale per leggere eventuali messaggi di webhook o bot se necessario
 			dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 				if m.Author.ID == s.State.User.ID {
 					return
 				}
-				// Se il messaggio contiene la stringa BOT_DATA inviata dal sito, il bot può elaborarla in automatico
 				if strings.Contains(m.Content, "INVEST|") {
-					// Esempio di parsing automatico se il webhook formatta il testo
-					// Formato atteso: INVEST|DiscordUser|RobloxUser|Capitale|Percentuale|Titolo
 					lines := strings.Split(m.Content, "\n")
 					for _, line := range lines {
 						if strings.HasPrefix(line, "INVEST|") {
@@ -937,7 +929,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		openModal(s, i, "modal_patente", "Richiesta Patente di Guida",
 			inputRow("p_nome", "Nome e Cognome RP", discordgo.TextInputShort, "", "Mario Rossi", true),
 			inputRow("p_roblox", "Username Roblox", discordgo.TextInputShort, "", "RobloxUser", true),
-			inputRow("p_tipo", "Tipo (A, B, C, D)", discordgo.TextInputShort, "", "Tipo B", true),
+			inputRow("p_tipo", "Tipo (A = Moto, B = Veicoli, C, D)", discordgo.TextInputShort, "", "Tipo B (Veicoli)", true),
 		)
 
 	case "btn_richiedi_cittadinanza":
@@ -1022,7 +1014,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // ---------------------------------------------------------------------------
-// PUBBLICAZIONE PANNELLI
+// PUBBLICAZIONE PANNELLI (AGGIORNATI CON PATENTE A = MOTO, B = VEICOLI)
 // ---------------------------------------------------------------------------
 
 func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
@@ -1045,9 +1037,9 @@ func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey strin
 			Title: "🪪 SPORTOLLO RICHIESTA PATENTE DI GUIDA",
 			Description: "Vuoi circolare liberamente e in piena regola per le strade della città? Invia qui la tua richiesta ufficiale.\n\n" +
 				"📋 **Categorie di Patenti Disponibili:**\n" +
-				"• **Tipo A:** Abilitazione alla conduzione di Moto e Scooter.\n" +
-				"• **Tipo B:** Abilitazione alla conduzione di Autoveicoli e Utilitarie.\n" +
-				"• **Tipo C / D:** Abilitazione per Mezzi Pesanti, Camion e Pulmini.\n\n" +
+				"• **Patente A:** Abilitazione alla conduzione di **Motocicli e Scooter**.\n" +
+				"• **Patente B:** Abilitazione alla conduzione di **Veicoli e Autovetture**.\n" +
+				"• **Patente C / D:** Abilitazione per Mezzi Pesanti, Camion e Pulmini.\n\n" +
 				"ℹ️ **Regolamento Stradale:** Al rilascio del documento, ogni cittadino riceverà un tesserino pulito con un totale di **30 punti** iniziali.",
 			Color: 0xF1C40F,
 		}
