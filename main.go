@@ -42,14 +42,14 @@ type BankAccount struct {
 }
 
 type WeeklyInvestment struct {
-	ID         string    `json:"id"`
-	Discord    string    `json:"discord"`
-	Roblox     string    `json:"roblox"`
-	Titolo     string    `json:"titolo"`
-	Importo    int       `json:"importo"`
+	ID          string    `json:"id"`
+	Discord     string    `json:"discord"`
+	Roblox      string    `json:"roblox"`
+	Titolo      string    `json:"titolo"`
+	Importo     int       `json:"importo"`
 	Settimanale int       `json:"settimanale"`
-	NextPayout time.Time `json:"next_payout"`
-	Active     bool      `json:"active"`
+	NextPayout  time.Time `json:"next_payout"`
+	Active      bool      `json:"active"`
 }
 
 type ApproveAPIRequest struct {
@@ -281,6 +281,7 @@ func sendPanel(s *discordgo.Session, channelID string, embed discordgo.MessageEm
 // GESTIONE AUTOMATICA BORSA VALORI & PAGAMENTI SETTIMANALI SUL CONTO
 // ---------------------------------------------------------------------------
 
+// Deve essere chiamata con mu.Lock() già acquisito.
 func findAccountKeyLocked(discordUser, robloxUser string) (string, bool) {
 	cleanDiscord := strings.TrimSpace(strings.TrimPrefix(discordUser, "@"))
 	cleanRoblox := strings.TrimSpace(strings.TrimPrefix(robloxUser, "@"))
@@ -323,15 +324,28 @@ func activateWeeklyInvestment(req ApproveAPIRequest) (bool, string) {
 	}
 
 	accKey, found := findAccountKeyLocked(req.Discord, req.Roblox)
-	targetAccountID := accKey
 	if !found {
-		targetAccountID = strings.TrimSpace(strings.TrimPrefix(req.Discord, "@"))
+		return false, fmt.Sprintf("Conto non trovato per Discord '%s' / Roblox '%s': apri prima il conto sul server Discord", req.Discord, req.Roblox)
 	}
 
+	acc := userBankAccounts[accKey]
+	if req.Importo > 0 {
+		if acc.Balance < req.Importo {
+			return false, fmt.Sprintf("Saldo insufficiente sul conto di %s: disponibili € %d, richiesti € %d", accKey, acc.Balance, req.Importo)
+		}
+		// 1. Toglie subito il capitale investito
+		acc.Balance -= req.Importo
+	}
+
+	// 2. Accredita subito la prima soglia settimanale
+	acc.Balance += req.Settimanale
+	userBankAccounts[accKey] = acc
+
+	// 3. Programma i successivi pagamenti ogni 7 giorni
 	now := time.Now()
 	inv := WeeklyInvestment{
 		ID:          fmt.Sprintf("inv_%d", now.UnixNano()),
-		Discord:     targetAccountID,
+		Discord:     accKey,
 		Roblox:      req.Roblox,
 		Titolo:      req.Titolo,
 		Importo:     req.Importo,
@@ -342,28 +356,25 @@ func activateWeeklyInvestment(req ApproveAPIRequest) (bool, string) {
 	activeInvestments = append(activeInvestments, inv)
 	saveStateLocked()
 
-	log.Printf("📈 Investimento settimanale attivato: account=%s titolo=%s importo=€%d settimanale=€%d prossimo=%s",
-		targetAccountID, inv.Titolo, inv.Importo, inv.Settimanale, inv.NextPayout.Format(time.RFC3339))
+	log.Printf("📉📈 Investimento attivato per %s: -€%d capitale, +€%d prima rata immediata (Saldo: €%d) | Prossima tra 7gg",
+		accKey, req.Importo, req.Settimanale, acc.Balance)
 
-	if discordSession != nil && found {
+	if discordSession != nil {
 		if ch, err := discordSession.UserChannelCreate(accKey); err == nil {
-			acc := userBankAccounts[accKey]
 			discordSession.ChannelMessageSend(ch.ID, fmt.Sprintf(
-				"📈 **INVESTIMENTO ATTIVATO DAL BOT**\n"+
+				"📈 **INVESTIMENTO ATTIVATO SUL CONTO**\n"+
 					"• **Titolo:** %s\n"+
-					"• **Capitale:** `€ %d`\n"+
-					"• **Accredito Settimanale:** `+ € %d` ogni 7 giorni (Prossimo accredito: <t:%d:R>)\n"+
-					"• **Saldo Attuale Conto:** `€ %d`",
-				inv.Titolo, inv.Importo, inv.Settimanale, inv.NextPayout.Unix(), acc.Balance,
+					"• **Capitale Scalato:** `- € %d`\n"+
+					"• **Prima Soglia Settimanale Accreditata Subito:** `+ € %d`\n"+
+					"• **Nuovo Saldo Conto:** `€ %d`\n"+
+					"• **Prossimo Accredito Settimanale:** <t:%d:R> (ogni 7 giorni)",
+				inv.Titolo, inv.Importo, inv.Settimanale, acc.Balance, inv.NextPayout.Unix(),
 			))
 		}
 	}
 
-	if !found {
-		return true, fmt.Sprintf("Investimento registrato per '%s' (nota: conto non ancora trovato in memoria del bot; apri il conto con /apri-conto o il pannello banca per ricevere i pagamenti settimanali)", req.Discord)
-	}
-
-	return true, fmt.Sprintf("Investimento attivo su conto %s: +€ %d ogni 7 giorni", accKey, inv.Settimanale)
+	return true, fmt.Sprintf("Scalati € %d e accreditati subito € %d su %s (Saldo: € %d). Prossima rata tra 7 giorni.",
+		req.Importo, req.Settimanale, accKey, acc.Balance)
 }
 
 func payDueWeeklyInvestments() {
@@ -437,10 +448,11 @@ func processStockInvestment(discordUser, robloxUser string, capitale, percentual
 		return fmt.Sprintf("⚠️ **Investimento Respinto:** Saldo insufficiente per <@%s> (`@%s`). Saldo attuale: `€ %d`, richiesto: `€ %.0f`.", targetID, robloxUser, account.Balance, capitale)
 	}
 
+	guadagnoSettimanale := int(capitale * (percentuale / 100.0))
 	account.Balance -= int(capitale)
+	account.Balance += guadagnoSettimanale
 	userBankAccounts[targetID] = account
 
-	guadagnoSettimanale := int(capitale * (percentuale / 100.0))
 	now := time.Now()
 	activeInvestments = append(activeInvestments, WeeklyInvestment{
 		ID:          fmt.Sprintf("inv_%d", now.UnixNano()),
@@ -457,9 +469,10 @@ func processStockInvestment(discordUser, robloxUser string, capitale, percentual
 	return fmt.Sprintf("📈 **INVESTIMENTO IN BORSA ELABORATO DAL BOT!**\n"+
 		"• **Cittadino:** <@%s> (`@%s`)\n"+
 		"• **Titolo:** %s\n"+
-		"• **Capitale Scalato:** `- € %.0f` (Nuovo saldo conto: `€ %d`)\n"+
-		"• **Accredito Automatico Settimanale:** `+ € %d` ogni 7 giorni (Tasso: `%.1f%%`)",
-		targetID, robloxUser, titolo, capitale, account.Balance, guadagnoSettimanale, percentuale)
+		"• **Capitale Scalato:** `- € %.0f`\n"+
+		"• **Prima Soglia Subito Accreditata:** `+ € %d` (Nuovo saldo conto: `€ %d`)\n"+
+		"• **Prossimi Accrediti Settimanali:** `+ € %d` ogni 7 giorni (Tasso: `%.1f%%`)",
+		targetID, robloxUser, titolo, capitale, guadagnoSettimanale, account.Balance, guadagnoSettimanale, percentuale)
 }
 
 func handleApproveAPI(w http.ResponseWriter, r *http.Request) {
@@ -1323,7 +1336,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // ---------------------------------------------------------------------------
-// PUBBLICAZIONE PANNELLI
+// PUBBLICAZIONE PANNELLI (AGGIORNATI CON PATENTE A = MOTO, B = VEICOLI)
 // ---------------------------------------------------------------------------
 
 func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
