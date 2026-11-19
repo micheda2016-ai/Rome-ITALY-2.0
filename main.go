@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,7 +15,11 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-const guildID = "1488262125708116198"
+const (
+	guildID      = "1488262125708116198"
+	botAPIKey    = "STAFF26ROME"
+	weeklyPeriod = 7 * 24 * time.Hour
+)
 
 // ---------------------------------------------------------------------------
 // STRUTTURE
@@ -33,6 +38,27 @@ type BankAccount struct {
 	Balance     int
 	LastPayday  time.Time
 	LastTaxPaid time.Time
+}
+
+type WeeklyInvestment struct {
+	ID         string    `json:"id"`
+	Discord    string    `json:"discord"`
+	Roblox     string    `json:"roblox"`
+	Titolo     string    `json:"titolo"`
+	Importo    int       `json:"importo"`
+	Settimanale int       `json:"settimanale"`
+	NextPayout time.Time `json:"next_payout"`
+	Active     bool      `json:"active"`
+}
+
+type ApproveAPIRequest struct {
+	Azione      string `json:"azione"`
+	Discord     string `json:"discord"`
+	Roblox      string `json:"roblox"`
+	Titolo      string `json:"titolo"`
+	Importo     int    `json:"importo"`
+	Settimanale int    `json:"settimanale"`
+	Nome        string `json:"nome"`
 }
 
 type AnagrafeRecord struct {
@@ -74,12 +100,14 @@ var mu sync.Mutex
 
 var serverConfigs = make(map[string]*ServerConfig)
 var userBankAccounts = make(map[string]BankAccount)
+var activeInvestments []WeeklyInvestment
 var dbAnagrafe = make(map[string]AnagrafeRecord)
 var dbPortoDarmi = make(map[string]PortoDarmiRecord)
 var dbImmatricolazioni = make(map[string]ImmatricolazioneRecord)
 var dbPatenti = make(map[string]PatenteRecord)
 
 var stipendioFisso = 13000
+var discordSession *discordgo.Session
 
 // ---------------------------------------------------------------------------
 // HELPER
@@ -183,30 +211,135 @@ func sendPanel(s *discordgo.Session, channelID string, embed discordgo.MessageEm
 }
 
 // ---------------------------------------------------------------------------
-// GESTIONE AUTOMATICA BORSA VALORI (INVESTIMENTI DAL SITO)
+// GESTIONE AUTOMATICA BORSA VALORI & PAGAMENTI SETTIMANALI SUL CONTO
 // ---------------------------------------------------------------------------
+
+// Deve essere chiamata con mu.Lock() già acquisito.
+func findAccountKeyLocked(discordUser, robloxUser string) (string, bool) {
+	cleanDiscord := strings.TrimSpace(strings.TrimPrefix(discordUser, "@"))
+	cleanRoblox := strings.TrimSpace(strings.TrimPrefix(robloxUser, "@"))
+
+	if cleanDiscord != "" {
+		if _, ok := userBankAccounts[cleanDiscord]; ok {
+			return cleanDiscord, true
+		}
+	}
+
+	if discordSession != nil && cleanDiscord != "" {
+		if members, err := discordSession.GuildMembers(guildID, "", 1000); err == nil {
+			for _, m := range members {
+				if strings.EqualFold(m.User.Username, cleanDiscord) || strings.EqualFold(m.User.GlobalName, cleanDiscord) {
+					if _, ok := userBankAccounts[m.User.ID]; ok {
+						return m.User.ID, true
+					}
+				}
+			}
+		}
+	}
+
+	if cleanRoblox != "" {
+		for id, acc := range userBankAccounts {
+			if strings.EqualFold(acc.RobloxName, cleanRoblox) {
+				return id, true
+			}
+		}
+	}
+
+	return "", false
+}
+
+func activateWeeklyInvestment(req ApproveAPIRequest) (bool, string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if req.Settimanale <= 0 {
+		return false, "Importo settimanale non valido"
+	}
+
+	accKey, found := findAccountKeyLocked(req.Discord, req.Roblox)
+	if !found {
+		return false, fmt.Sprintf("Conto non trovato per Discord '%s' / Roblox '%s'", req.Discord, req.Roblox)
+	}
+
+	now := time.Now()
+	inv := WeeklyInvestment{
+		ID:         fmt.Sprintf("inv_%d", now.UnixNano()),
+		Discord:    accKey,
+		Roblox:     req.Roblox,
+		Titolo:     req.Titolo,
+		Importo:    req.Importo,
+		Settimanale: req.Settimanale,
+		NextPayout: now.Add(weeklyPeriod),
+		Active:     true,
+	}
+	activeInvestments = append(activeInvestments, inv)
+
+	log.Printf("📈 Investimento settimanale attivato: account=%s titolo=%s settimanale=€%d prossimo=%s",
+		accKey, inv.Titolo, inv.Settimanale, inv.NextPayout.Format(time.RFC3339))
+
+	return true, fmt.Sprintf("Investimento attivo su conto %s: +€ %d ogni 7 giorni", accKey, inv.Settimanale)
+}
+
+func payDueWeeklyInvestments() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	now := time.Now()
+	for idx := range activeInvestments {
+		inv := &activeInvestments[idx]
+		if !inv.Active || now.Before(inv.NextPayout) {
+			continue
+		}
+
+		acc, exists := userBankAccounts[inv.Discord]
+		if !exists {
+			if key, found := findAccountKeyLocked(inv.Discord, inv.Roblox); found {
+				inv.Discord = key
+				acc = userBankAccounts[key]
+				exists = true
+			}
+		}
+
+		if exists {
+			acc.Balance += inv.Settimanale
+			userBankAccounts[inv.Discord] = acc
+			inv.NextPayout = now.Add(weeklyPeriod)
+
+			log.Printf("💶 Pagata rendita settimanale a %s: +€ %d (Nuovo saldo: € %d)",
+				inv.Discord, inv.Settimanale, acc.Balance)
+
+			if discordSession != nil {
+				if ch, err := discordSession.UserChannelCreate(inv.Discord); err == nil {
+					discordSession.ChannelMessageSend(ch.ID, fmt.Sprintf(
+						"💶 **RENDITA SETTIMANALE INVESTIMENTO**\nTi sono stati accreditati **€ %d** sul tuo conto per il titolo **%s**.\n💰 Nuovo saldo: `€ %d`",
+						inv.Settimanale, inv.Titolo, acc.Balance,
+					))
+				}
+			}
+		}
+	}
+}
+
+func startWeeklyInvestmentPayouts() {
+	ticker := time.NewTicker(1 * time.Hour)
+	go func() {
+		defer ticker.Stop()
+		for range ticker.C {
+			payDueWeeklyInvestments()
+		}
+	}()
+}
 
 func processStockInvestment(discordUser, robloxUser string, capitale, percentuale float64, titolo string) string {
 	mu.Lock()
 	defer mu.Unlock()
 
-	var targetID string
-	var account BankAccount
-	var found bool
-
-	for id, acc := range userBankAccounts {
-		if id == discordUser || strings.EqualFold(acc.RobloxName, robloxUser) {
-			targetID = id
-			account = acc
-			found = true
-			break
-		}
-	}
-
+	targetID, found := findAccountKeyLocked(discordUser, robloxUser)
 	if !found {
 		return fmt.Sprintf("⚠️ Richiesta Borsa ricevuta per `@%s` (Discord: `%s`), ma l'utente non ha ancora aperto un conto bancario tramite il comando `/conto` o il pannello Discord.", robloxUser, discordUser)
 	}
 
+	account := userBankAccounts[targetID]
 	if float64(account.Balance) < capitale {
 		return fmt.Sprintf("⚠️ **Investimento Respinto:** Saldo insufficiente per <@%s> (`@%s`). Saldo attuale: `€ %d`, richiesto: `€ %.0f`.", targetID, robloxUser, account.Balance, capitale)
 	}
@@ -214,14 +347,57 @@ func processStockInvestment(discordUser, robloxUser string, capitale, percentual
 	account.Balance -= int(capitale)
 	userBankAccounts[targetID] = account
 
-	guadagnoSettimanale := capitale * (percentuale / 100.0)
+	guadagnoSettimanale := int(capitale * (percentuale / 100.0))
+	now := time.Now()
+	activeInvestments = append(activeInvestments, WeeklyInvestment{
+		ID:         fmt.Sprintf("inv_%d", now.UnixNano()),
+		Discord:    targetID,
+		Roblox:     robloxUser,
+		Titolo:     titolo,
+		Importo:    int(capitale),
+		Settimanale: guadagnoSettimanale,
+		NextPayout: now.Add(weeklyPeriod),
+		Active:     true,
+	})
 
 	return fmt.Sprintf("📈 **INVESTIMENTO IN BORSA ELABORATO DAL BOT!**\n"+
 		"• **Cittadino:** <@%s> (`@%s`)\n"+
 		"• **Titolo:** %s\n"+
 		"• **Capitale Scalato:** `- € %.0f` (Nuovo saldo conto: `€ %d`)\n"+
-		"• **Rendimento Settimanale:** `+ € %.2f` (Tasso: `%.1f%%`)",
+		"• **Accredito Automatico Settimanale:** `+ € %d` ogni 7 giorni (Tasso: `%.1f%%`)",
 		targetID, robloxUser, titolo, capitale, account.Balance, guadagnoSettimanale, percentuale)
+}
+
+func handleApproveAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "Metodo non consentito"})
+		return
+	}
+
+	apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
+	if apiKey != botAPIKey {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "Chiave API non valida"})
+		return
+	}
+
+	var req ApproveAPIRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "JSON non valido"})
+		return
+	}
+
+	if req.Azione == "ATTIVA_INVESTIMENTO" {
+		ok, msg := activateWeeklyInvestment(req)
+		json.NewEncoder(w).Encode(map[string]any{"ok": ok, "message": msg})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "message": "Azione ricevuta"})
 }
 
 // ---------------------------------------------------------------------------
@@ -234,14 +410,19 @@ func main() {
 		port = "10000"
 	}
 	go func() {
-		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Bot Rome Italy 2.0 Online!")
 		})
+		mux.HandleFunc("/api/approva", handleApproveAPI)
+
 		log.Printf("Server HTTP avviato sulla porta %s", port)
-		if err := http.ListenAndServe(":"+port, nil); err != nil {
+		if err := http.ListenAndServe(":"+port, mux); err != nil {
 			log.Printf("Errore server HTTP: %v", err)
 		}
 	}()
+
+	startWeeklyInvestmentPayouts()
 
 	token := strings.TrimSpace(os.Getenv("TOKEN"))
 	if token == "" {
@@ -257,8 +438,9 @@ func main() {
 		if err != nil {
 			log.Printf("Errore creazione sessione Discord: %v", err)
 		} else {
+			discordSession = dg
 			dg.AddHandler(interactionHandler)
-			
+
 			dg.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 				if m.Author.ID == s.State.User.ID {
 					return
