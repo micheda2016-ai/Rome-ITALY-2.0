@@ -19,6 +19,7 @@ const (
 	guildID      = "1488262125708116198"
 	botAPIKey    = "STAFF26ROME"
 	weeklyPeriod = 7 * 24 * time.Hour
+	dataFilePath = "rome_italy_data.json"
 )
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,15 @@ type PatenteRecord struct {
 	Punti      int
 }
 
+type PersistedState struct {
+	BankAccounts      map[string]BankAccount          `json:"bank_accounts"`
+	ActiveInvestments []WeeklyInvestment              `json:"active_investments"`
+	Anagrafe          map[string]AnagrafeRecord        `json:"anagrafe"`
+	PortoDarmi        map[string]PortoDarmiRecord      `json:"porto_darmi"`
+	Immatricolazioni  map[string]ImmatricolazioneRecord `json:"immatricolazioni"`
+	Patenti           map[string]PatenteRecord         `json:"patenti"`
+}
+
 // ---------------------------------------------------------------------------
 // DATI IN MEMORIA
 // ---------------------------------------------------------------------------
@@ -108,6 +118,63 @@ var dbPatenti = make(map[string]PatenteRecord)
 
 var stipendioFisso = 13000
 var discordSession *discordgo.Session
+
+// ---------------------------------------------------------------------------
+// PERSISTENZA SU FILE
+// ---------------------------------------------------------------------------
+
+func saveStateLocked() {
+	state := PersistedState{
+		BankAccounts:      userBankAccounts,
+		ActiveInvestments: activeInvestments,
+		Anagrafe:          dbAnagrafe,
+		PortoDarmi:        dbPortoDarmi,
+		Immatricolazioni:  dbImmatricolazioni,
+		Patenti:           dbPatenti,
+	}
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		log.Printf("⚠️ Errore serializzazione stato: %v", err)
+		return
+	}
+	if err := os.WriteFile(dataFilePath, b, 0644); err != nil {
+		log.Printf("⚠️ Errore salvataggio %s: %v", dataFilePath, err)
+	}
+}
+
+func loadState() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	b, err := os.ReadFile(dataFilePath)
+	if err != nil {
+		return
+	}
+	var state PersistedState
+	if err := json.Unmarshal(b, &state); err != nil {
+		log.Printf("⚠️ Errore lettura %s: %v", dataFilePath, err)
+		return
+	}
+	if state.BankAccounts != nil {
+		userBankAccounts = state.BankAccounts
+	}
+	if state.ActiveInvestments != nil {
+		activeInvestments = state.ActiveInvestments
+	}
+	if state.Anagrafe != nil {
+		dbAnagrafe = state.Anagrafe
+	}
+	if state.PortoDarmi != nil {
+		dbPortoDarmi = state.PortoDarmi
+	}
+	if state.Immatricolazioni != nil {
+		dbImmatricolazioni = state.Immatricolazioni
+	}
+	if state.Patenti != nil {
+		dbPatenti = state.Patenti
+	}
+	log.Printf("💾 Stato caricato da %s (%d conti, %d investimenti)", dataFilePath, len(userBankAccounts), len(activeInvestments))
+}
 
 // ---------------------------------------------------------------------------
 // HELPER
@@ -214,7 +281,6 @@ func sendPanel(s *discordgo.Session, channelID string, embed discordgo.MessageEm
 // GESTIONE AUTOMATICA BORSA VALORI & PAGAMENTI SETTIMANALI SUL CONTO
 // ---------------------------------------------------------------------------
 
-// Deve essere chiamata con mu.Lock() già acquisito.
 func findAccountKeyLocked(discordUser, robloxUser string) (string, bool) {
 	cleanDiscord := strings.TrimSpace(strings.TrimPrefix(discordUser, "@"))
 	cleanRoblox := strings.TrimSpace(strings.TrimPrefix(robloxUser, "@"))
@@ -257,25 +323,45 @@ func activateWeeklyInvestment(req ApproveAPIRequest) (bool, string) {
 	}
 
 	accKey, found := findAccountKeyLocked(req.Discord, req.Roblox)
+	targetAccountID := accKey
 	if !found {
-		return false, fmt.Sprintf("Conto non trovato per Discord '%s' / Roblox '%s'", req.Discord, req.Roblox)
+		targetAccountID = strings.TrimSpace(strings.TrimPrefix(req.Discord, "@"))
 	}
 
 	now := time.Now()
 	inv := WeeklyInvestment{
-		ID:         fmt.Sprintf("inv_%d", now.UnixNano()),
-		Discord:    accKey,
-		Roblox:     req.Roblox,
-		Titolo:     req.Titolo,
-		Importo:    req.Importo,
+		ID:          fmt.Sprintf("inv_%d", now.UnixNano()),
+		Discord:     targetAccountID,
+		Roblox:      req.Roblox,
+		Titolo:      req.Titolo,
+		Importo:     req.Importo,
 		Settimanale: req.Settimanale,
-		NextPayout: now.Add(weeklyPeriod),
-		Active:     true,
+		NextPayout:  now.Add(weeklyPeriod),
+		Active:      true,
 	}
 	activeInvestments = append(activeInvestments, inv)
+	saveStateLocked()
 
-	log.Printf("📈 Investimento settimanale attivato: account=%s titolo=%s settimanale=€%d prossimo=%s",
-		accKey, inv.Titolo, inv.Settimanale, inv.NextPayout.Format(time.RFC3339))
+	log.Printf("📈 Investimento settimanale attivato: account=%s titolo=%s importo=€%d settimanale=€%d prossimo=%s",
+		targetAccountID, inv.Titolo, inv.Importo, inv.Settimanale, inv.NextPayout.Format(time.RFC3339))
+
+	if discordSession != nil && found {
+		if ch, err := discordSession.UserChannelCreate(accKey); err == nil {
+			acc := userBankAccounts[accKey]
+			discordSession.ChannelMessageSend(ch.ID, fmt.Sprintf(
+				"📈 **INVESTIMENTO ATTIVATO DAL BOT**\n"+
+					"• **Titolo:** %s\n"+
+					"• **Capitale:** `€ %d`\n"+
+					"• **Accredito Settimanale:** `+ € %d` ogni 7 giorni (Prossimo accredito: <t:%d:R>)\n"+
+					"• **Saldo Attuale Conto:** `€ %d`",
+				inv.Titolo, inv.Importo, inv.Settimanale, inv.NextPayout.Unix(), acc.Balance,
+			))
+		}
+	}
+
+	if !found {
+		return true, fmt.Sprintf("Investimento registrato per '%s' (nota: conto non ancora trovato in memoria del bot; apri il conto con /apri-conto o il pannello banca per ricevere i pagamenti settimanali)", req.Discord)
+	}
 
 	return true, fmt.Sprintf("Investimento attivo su conto %s: +€ %d ogni 7 giorni", accKey, inv.Settimanale)
 }
@@ -285,6 +371,8 @@ func payDueWeeklyInvestments() {
 	defer mu.Unlock()
 
 	now := time.Now()
+	changed := false
+
 	for idx := range activeInvestments {
 		inv := &activeInvestments[idx]
 		if !inv.Active || now.Before(inv.NextPayout) {
@@ -304,6 +392,7 @@ func payDueWeeklyInvestments() {
 			acc.Balance += inv.Settimanale
 			userBankAccounts[inv.Discord] = acc
 			inv.NextPayout = now.Add(weeklyPeriod)
+			changed = true
 
 			log.Printf("💶 Pagata rendita settimanale a %s: +€ %d (Nuovo saldo: € %d)",
 				inv.Discord, inv.Settimanale, acc.Balance)
@@ -317,6 +406,10 @@ func payDueWeeklyInvestments() {
 				}
 			}
 		}
+	}
+
+	if changed {
+		saveStateLocked()
 	}
 }
 
@@ -350,15 +443,16 @@ func processStockInvestment(discordUser, robloxUser string, capitale, percentual
 	guadagnoSettimanale := int(capitale * (percentuale / 100.0))
 	now := time.Now()
 	activeInvestments = append(activeInvestments, WeeklyInvestment{
-		ID:         fmt.Sprintf("inv_%d", now.UnixNano()),
-		Discord:    targetID,
-		Roblox:     robloxUser,
-		Titolo:     titolo,
-		Importo:    int(capitale),
+		ID:          fmt.Sprintf("inv_%d", now.UnixNano()),
+		Discord:     targetID,
+		Roblox:      robloxUser,
+		Titolo:      titolo,
+		Importo:     int(capitale),
 		Settimanale: guadagnoSettimanale,
-		NextPayout: now.Add(weeklyPeriod),
-		Active:     true,
+		NextPayout:  now.Add(weeklyPeriod),
+		Active:      true,
 	})
+	saveStateLocked()
 
 	return fmt.Sprintf("📈 **INVESTIMENTO IN BORSA ELABORATO DAL BOT!**\n"+
 		"• **Cittadino:** <@%s> (`@%s`)\n"+
@@ -405,6 +499,8 @@ func handleApproveAPI(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func main() {
+	loadState()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "10000"
@@ -496,6 +592,10 @@ func registerCommands(s *discordgo.Session) {
 		{
 			Name:        "conto",
 			Description: "Visualizza il saldo e le informazioni del tuo conto corrente",
+		},
+		{
+			Name:        "investimenti",
+			Description: "Visualizza i tuoi investimenti attivi e la prossima rendita settimanale",
 		},
 		{
 			Name:        "patente",
@@ -680,6 +780,25 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	if data.Name == "investimenti" {
+		var sb strings.Builder
+		sb.WriteString("📈 **I TUOI INVESTIMENTI ATTIVI:**\n\n")
+		count := 0
+		for _, inv := range activeInvestments {
+			if inv.Active && (inv.Discord == userID || strings.EqualFold(inv.Discord, i.Member.User.Username)) {
+				count++
+				sb.WriteString(fmt.Sprintf("• **%s** — Capitale: `€ %d` • Rendita settimanale: `+ € %d` • Prossimo accredito: <t:%d:R>\n",
+					inv.Titolo, inv.Importo, inv.Settimanale, inv.NextPayout.Unix()))
+			}
+		}
+		if count == 0 {
+			respond(s, i, "ℹ️ Non hai investimenti settimanali attivi al momento.")
+			return
+		}
+		respond(s, i, truncate(sb.String(), 1900))
+		return
+	}
+
 	if data.Name == "patente" {
 		pat, exists := dbPatenti[userID]
 		if !exists {
@@ -719,10 +838,12 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			}
 			account.Balance -= importo
 			userBankAccounts[userID] = account
+			saveStateLocked()
 			respond(s, i, fmt.Sprintf("💵 Prelevati **€ %d**. Nuovo saldo: `€ %d`", importo, account.Balance))
 		} else {
 			account.Balance += importo
 			userBankAccounts[userID] = account
+			saveStateLocked()
 			respond(s, i, fmt.Sprintf("💳 Depositati **€ %d**. Nuovo saldo: `€ %d`", importo, account.Balance))
 		}
 		return
@@ -847,6 +968,7 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			acc := userBankAccounts[targetID]
 			acc.Balance = nuovoSaldo
 			userBankAccounts[targetID] = acc
+			saveStateLocked()
 			respond(s, i, fmt.Sprintf("✅ Saldo conto di <@%s> modificato a € %d.", targetID, nuovoSaldo))
 			return
 		}
@@ -862,6 +984,7 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				n, c = parts[0], parts[1]
 			}
 			dbAnagrafe[targetID] = AnagrafeRecord{UserID: targetID, RobloxUser: rob, NomeRP: n, CognomeRP: c, DataNascita: dat, Sesso: ses}
+			saveStateLocked()
 			respond(s, i, fmt.Sprintf("✅ Anagrafica di <@%s> aggiornata.", targetID))
 			return
 		}
@@ -884,6 +1007,7 @@ func handleSlashCommands(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			pat.Punti = 0
 		}
 		dbPatenti[targetID] = pat
+		saveStateLocked()
 
 		respond(s, i, fmt.Sprintf("✅ Decurtati **%d punti** a <@%s>. Rimasti: **%d / 30**", punti, targetID, pat.Punti))
 
@@ -1027,6 +1151,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		if azione == "yes" && (strings.Contains(embedOrig.Title, "PATENTE") || strings.Contains(embedOrig.Description, "Patente")) {
 			dbPatenti[targetUserID] = PatenteRecord{UserID: targetUserID, RobloxUser: "Cittadino", NomeRP: "RP", Tipo: "Tipo B", Punti: 30}
+			saveStateLocked()
 		}
 
 		if ch, err := s.UserChannelCreate(targetUserID); err == nil {
@@ -1173,6 +1298,7 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		acc.Balance -= totTasse
 		acc.LastTaxPaid = time.Now()
 		userBankAccounts[staffID] = acc
+		saveStateLocked()
 		respond(s, i, fmt.Sprintf("🏛️ Tasse settimanali pagate con successo! Detratti € %d. Saldo residuo: `€ %d`", totTasse, acc.Balance))
 
 	case "btn_riscuoti_stipendio":
@@ -1191,12 +1317,13 @@ func handleComponents(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		acc.Balance += stipendioFisso
 		acc.LastPayday = time.Now()
 		userBankAccounts[staffID] = acc
+		saveStateLocked()
 		respond(s, i, fmt.Sprintf("✅ Busta paga settimanale riscossa! Accreditati € %d. Nuovo saldo: `€ %d`", stipendioFisso, acc.Balance))
 	}
 }
 
 // ---------------------------------------------------------------------------
-// PUBBLICAZIONE PANNELLI (AGGIORNATI CON PATENTE A = MOTO, B = VEICOLI)
+// PUBBLICAZIONE PANNELLI
 // ---------------------------------------------------------------------------
 
 func publishPublicPanel(s *discordgo.Session, channelID string, serviceKey string) {
@@ -1322,6 +1449,7 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		rUsr := modalVal(data, 1)
 
 		userBankAccounts[userID] = BankAccount{OwnerName: modalVal(data, 0), RobloxName: rUsr, BankName: banca, Balance: 7000}
+		saveStateLocked()
 		respond(s, i, "🎉 Conto aperto! Accreditati € 7.000 di bonus.")
 
 		embed := discordgo.MessageEmbed{
